@@ -1,0 +1,13 @@
+
+# Build files
+*.o
+*.d
+*.sys
+*.img
+
+# Doxygen output
+html/
+latex/
+
+# VS Code settings
+.vscode/
