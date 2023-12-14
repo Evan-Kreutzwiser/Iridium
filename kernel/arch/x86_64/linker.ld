@@ -31,20 +31,20 @@ SECTIONS
         _TEXT_END_ = .;
     }
 
-    .rodata : AT(ADDR(.rodata) - KERNEL_VIRTUAL_ADDRESS)
-    {
-        _RODATA_START_ = .;
-        *(.rodata)
-        . = ALIGN(4096);
-        _RODATA_END_ = .;
-    }
-
     .data : AT(ADDR(.data) - KERNEL_VIRTUAL_ADDRESS)
     {
         _DATA_START_ = .;
         *(.data)
         . = ALIGN(4096);
         _DATA_END_ = .;
+    }
+
+    .rodata : AT(ADDR(.rodata) - KERNEL_VIRTUAL_ADDRESS)
+    {
+        _RODATA_START_ = .;
+        *(.rodata)
+        . = ALIGN(4096);
+        _RODATA_END_ = .;
     }
 
     KERNEL_PHYSICAL_DATA_END = . - KERNEL_VIRTUAL_ADDRESS;
