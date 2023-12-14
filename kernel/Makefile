@@ -1,7 +1,7 @@
 # Disable implicit rules.
 # Fixes an issue where make incorrectly uses the
 # implicit rule instead of using the one defined here
-#.SUFFIXES:
+.SUFFIXES:
 
 ARCH ?= x86_64
 
@@ -33,10 +33,10 @@ all: $(TARGET)
 $(TARGET): $(OBJS) $(ARCH_OBJS)
 	$(LD) $(LDFLAGS) $(OBJS) $(ARCH_OBJS) -o $@
 
-%.o: %.c %.d makefile
+%.o: %.c %.d Makefile
 	$(CC) $(CFLAGS) -MMD -MP $(INCS) $(WARNINGS) -c $< -o $@
 
-%.o: %.S %.d makefile
+%.o: %.S %.d Makefile
 	$(CC) $(CFLAGS) -MMD -MP $(INCS) $(WARNINGS) -c $< -o $@
 
 $(DEPS) $(ARCH_DEPS):
