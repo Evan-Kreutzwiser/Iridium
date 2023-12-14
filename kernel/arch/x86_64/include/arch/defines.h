@@ -8,7 +8,10 @@
 
 #define NUMBER_OF_INTERRUPTS 256
 
+/// Address where the kernel is loaded
 #define KERNEL_VIRTUAL_ADDRESS  0xFFFFFFFF80000000ul
+/// Start of higher half memory
+/// @note Not where kernel itself is loaded
 #define KERNEL_MEMORY_BASE      0xFFFF800000000000ul
 #define KERNEL_MEMORY_LENGTH        0x800000000000ul
 #define USER_MEMORY_LENGTH          0x800000000000ul

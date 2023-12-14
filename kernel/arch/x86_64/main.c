@@ -21,9 +21,10 @@
 #include <stdbool.h>
 #include <stdnoreturn.h>
 
-#define CPUID_EDX_PAE (1 << 6)
 #define CPUID_EDX_PSE (1 << 3)
+#define CPUID_EDX_PAE (1 << 6)
 #define CPUID_EDX_PGE (1 << 13)
+#define CPUID_EDX_PAT (1 << 16)
 
 multiboot_info_t *multiboot_struct;
 
@@ -33,10 +34,54 @@ multiboot_info_t *multiboot_struct;
 #define MAX_MEMORY_REGIONS 32
 struct physical_region physical_memory_regions[MAX_MEMORY_REGIONS];
 
+/// @brief Pass the computer's physical memory regions on the the physical memory manager.
+/// @note This was moved to a seperate function so that `kernel_startup` can create a
+///       bootstrap heap that this can dynamically allocate the region list on.
+/// @see `memory_regions` for how the array is populated
+static void early_get_physical_memory_regions(struct multiboot_info *multiboot_info, struct physical_region **regions, size_t *count) {
+    struct multiboot_mmap_entry *memory_map = (void*)(uintptr_t)multiboot_info->mmap_addr;
+    size_t regions_count = multiboot_info->mmap_length / sizeof(struct multiboot_mmap_entry); // Number of mmap entries
+
+    debug_printf("%d mmap entries\n", regions_count);
+
+    if (regions_count > MAX_MEMORY_REGIONS) {
+        debug_printf("Too many memory regions (%zd)! Truncated to %d.\n", regions_count, MAX_MEMORY_REGIONS);
+    }
+
+    // Copy every memory map entry into the kernel's list
+    struct multiboot_mmap_entry *entry = memory_map;
+    for (uint i = 0; i < regions_count; i++) {
+
+        physical_memory_regions[i].base = entry->addr;
+        physical_memory_regions[i].length = entry->len;
+
+        // Translate mulitboot memory type to a generic type
+        if (entry->type == MULTIBOOT_MEMORY_AVAILABLE) {
+            physical_memory_regions[i].type = REGION_TYPE_AVAILABLE;
+        } else if (entry->type == MULTIBOOT_MEMORY_RESERVED) {
+            physical_memory_regions[i].type = REGION_TYPE_RESERVED;
+        } else if (entry->type == MULTIBOOT_MEMORY_ACPI_RECLAIMABLE) {
+            physical_memory_regions[i].type = REGION_TYPE_RECLAIMABLE;
+        } else {
+            physical_memory_regions[i].type = REGION_TYPE_UNUSABLE;
+        }
+
+        entry++;
+    }
+
+    *regions = physical_memory_regions;
+    *count = regions_count;
+}
+
 void arch_main(p_addr_t multiboot_struct_physical) {
 
     // Get the per-cpu data pointer ready as soon as possible, even if the contained data won't be ready for a while
     arch_set_cpu_local_pointer(&processor_local_data[0]);
+
+    extern struct physical_region *regions_array;
+    extern size_t regions_count;
+
+    early_get_physical_memory_regions((struct multiboot_info*)multiboot_struct_physical, &regions_array, &regions_count);
 
     debug_printf("multiboot struct @ %#p\n", multiboot_struct_physical);
 
@@ -49,6 +94,9 @@ void arch_main(p_addr_t multiboot_struct_physical) {
     debug_printf("CPUID feature leaf is %#lx\n", (uint64_t)(ecx) << 32 | edx);
     if (edx & CPUID_EDX_PGE) {
         debug_print("Has PGE\n");
+    }
+    if (edx & CPUID_EDX_PAT) {
+        debug_print("Has PAT\n");
     }
     if (edx & CPUID_EDX_PSE) {
         debug_print("Has PSE\n");
@@ -163,45 +211,6 @@ bool arch_validate_user_pointer(void *pointer) {
 
 bool arch_is_kernel_pointer(void *pointer) {
     return (uintptr_t)pointer > USER_MEMORY_LENGTH;
-}
-
-/// @brief Pass the computer's physical memory regions on the the physical memory manager.
-/// @note This was moved to a seperate function so that `kernel_startup` can create a
-///       bootstrap heap that this can dynamically allocate the region list on.
-/// @see `memory_regions` for how the array is populated
-void arch_get_physical_memory_regions(struct physical_region **regions, size_t *count) {
-    struct multiboot_mmap_entry *memory_map = (void*)p_addr_to_physical_map(multiboot_struct->mmap_addr);
-    size_t regions_count = multiboot_struct->mmap_length / sizeof(struct multiboot_mmap_entry); // Number of mmap entries
-
-    debug_printf("%d mmap entries\n", regions_count);
-
-    if (regions_count > MAX_MEMORY_REGIONS) {
-        debug_printf("Too many memory regions (%zd)! Truncated to %d.\n", regions_count, MAX_MEMORY_REGIONS);
-    }
-
-    // Copy every memory map entry into the kernel's list
-    struct multiboot_mmap_entry *entry = memory_map;
-    for (uint i = 0; i < regions_count; i++) {
-
-        physical_memory_regions[i].base = entry->addr;
-        physical_memory_regions[i].length = entry->len;
-
-        // Translate mulitboot memory type to a generic type
-        if (entry->type == MULTIBOOT_MEMORY_AVAILABLE) {
-            physical_memory_regions[i].type = REGION_TYPE_AVAILABLE;
-        } else if (entry->type == MULTIBOOT_MEMORY_RESERVED) {
-            physical_memory_regions[i].type = REGION_TYPE_RESERVED;
-        } else if (entry->type == MULTIBOOT_MEMORY_ACPI_RECLAIMABLE) {
-            physical_memory_regions[i].type = REGION_TYPE_RECLAIMABLE;
-        } else {
-            physical_memory_regions[i].type = REGION_TYPE_UNUSABLE;
-        }
-
-        entry++;
-    }
-
-    *regions = physical_memory_regions;
-    *count = regions_count;
 }
 
 void arch_set_instruction_pointer(struct registers *registers, uintptr_t pointer) {

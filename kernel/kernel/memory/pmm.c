@@ -72,8 +72,12 @@ static void pmm_free_list_remove(physical_page_info *page); // Take a specific p
 /// has been poppulated by the entry code. This function expects the regions' bases,
 /// lengths, and types to be set.
 void physical_memory_init() {
-    // Boot code used the physical address of the regions list, but we can only access it through the kernel space mapping now
-    arch_get_physical_memory_regions(&regions_array, &regions_count);
+    // The boot code is responsible for filling the regions list using information
+    // from the bootloader before the physical memory manager is initalized
+    if (!regions_array || regions_count == 0) {
+        debug_printf("FATAL: Boot code did not initalize memory regions!\n");
+        arch_pause();
+    }
 
     // Setup each usable region's internal page data array and update memory counters
     // Get all the available regions first, and allocate pages for other regions as required later

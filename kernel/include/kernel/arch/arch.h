@@ -6,12 +6,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdnoreturn.h>
-#define __need_size_t
-#include <stddef.h>
 
-struct registers;
-struct per_cpu_data;
-struct physical_region;
+struct registers; // Defined in arch/registers.h
+struct per_cpu_data; // Defined in kernel/cpu_locals.h
+struct physical_region; // Defined in kernel/memory/pmm.h
 
 /// @brief Set data accessible through `this_cpu` in kernel/process.h
 /// @param cpu_local_data This cpu's local data struct
@@ -24,9 +22,6 @@ bool arch_validate_user_pointer(void *pointer);
 
 /// Check whether a the target of a pointer is in kernel space
 bool arch_is_kernel_pointer(void *pointer);
-
-/// Called during boot while initializing the physical memory mamager
-void arch_get_physical_memory_regions(struct physical_region **regions, size_t *count);
 
 /// Pause execution on the cpu
 void arch_pause();
