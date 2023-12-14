@@ -11,3 +11,6 @@ latex/
 
 # VS Code settings
 .vscode/
+
+# Emulator logs
+*.txt
