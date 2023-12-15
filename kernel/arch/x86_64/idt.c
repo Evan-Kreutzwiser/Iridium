@@ -1,5 +1,6 @@
 
 #include "arch/x86_64/idt.h"
+#include "arch/x86_64/paging.h"
 #include "arch/x86_64/acpi.h"
 #include "arch/registers.h"
 #include "kernel/arch/arch.h"
@@ -107,6 +108,8 @@ void general_protection_fault(registers *context) {
     asm volatile ("1: hlt; jmp 1b;");
 }
 
+static bool is_in_page_fault = false;
+
 void page_fault(registers *context) {
     bool present = context->error_code & 0x1;
     bool write = context->error_code & (0x1 << 1);
@@ -139,6 +142,15 @@ void page_fault(registers *context) {
 
     dump_context(context);
     print_stack_trace(context->rbp, context->rip);
+
+
+    // If this causes an exception don't try again
+    if (!is_in_page_fault) {
+        is_in_page_fault = true;
+        uint64_t cr3;
+        asm volatile ("mov %%cr3, %%rax; mov %%rax, %0;" : "=m" (cr3) :: "rax");
+        paging_print_tables(cr3, accessed_address);
+    }
 
     asm volatile ("1: hlt; jmp 1b;");
 }

@@ -5,6 +5,7 @@
 #include "kernel/memory/boot_allocator.h"
 #include "kernel/memory/physical_map.h"
 #include "kernel/memory/init.h"
+#include "kernel/arch/mmu.h"
 #include "kernel/heap.h"
 #include "iridium/types.h"
 #include "iridium/errors.h"
@@ -127,9 +128,8 @@ static void pmm_init_region(struct physical_region *region) {
         return; // Trying to set it up could result in accesses to invalid memory
     }
 
+    // Back available regions' page data with pages carved from themselves
     if (region->type == REGION_TYPE_AVAILABLE) {
-        // Back available regions' page data with pages carved from themselves
-
         // Find and store the begining of the page array
         // The array will be accessible through the physical map in kernel space
         p_addr_t page_array_physical = region->base + region->length - page_array_size;
@@ -332,9 +332,9 @@ ir_status_t pmm_allocate_range(p_addr_t address, size_t length, physical_page_in
     }
     // Round start and end bounds outwards to ensure the region is encompased by whole pages
     p_addr_t old_base = address;
-    address = ROUND_DOWN_PAGE(old_base);
+    address = ROUND_UP_PAGE(old_base);
     p_addr_t old_end = old_base + length;
-    length = ROUND_UP_PAGE(old_end) - address;
+    length = ROUND_DOWN_PAGE(old_end) - address;
 
     size_t page_count =  length / PAGE_SIZE;
 
@@ -512,6 +512,11 @@ static void pmm_free_list_push(physical_page_info *page) {
 // Internal helper that pops the first page off the front of the linked list, to be allocated
 static physical_page_info *pmm_free_list_pop() {
     physical_page_info *popped_page = free_list;
+
+    if (popped_page->next == NULL) {
+        debug_printf("FATAL: Free page stack exhausted.\n");
+        arch_pause();
+    }
 
     // Move the next page to the start of the list
     free_list = popped_page->next;

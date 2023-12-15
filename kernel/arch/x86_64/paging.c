@@ -25,7 +25,8 @@
 #define PML4_PAGE_SIZE 0x8000000000
 
 /// The bits of the page entry used for the address
-#define PAGE_ADDRESS_MASK 0x000ffffffffff000ul
+#define PAGE_ADDRESS_MASK     0x000ffffffffff000ul
+#define PAGE_2MB_ADDRESS_MASK 0x000fffffffe00000ul
 /// Sign extension sets these bits for kernel memory OR this when extracting address from page tables
 #define HIGHER_HALF_BITS 0xffff800000000000ul
 
@@ -64,53 +65,47 @@ page_table_entry kernel_pml4[512] PAGE_ALIGNED;
 // All 256 kernel pml3s need to be set ahead of time so kernel mappings can be easily synchronised between processes
 page_table_entry kernel_pml3s[256][512] PAGE_ALIGNED;
 page_table_entry kernel_pml2[512] PAGE_ALIGNED;
-// Once memory allocation is online, the 2 MB pages will be split for fine-tuned access control.
-// The physical map uses 1 Gb pages (no pml2) to save space until physical memory is online,
-// then finer-grained permissions can be used.
+
+// Provides a way to view the pages allocated for the physical memory map
+// before it is finished being mapped, after which it will serve as a
+// normal page frame for kernel memory allocation
+page_table_entry bootstrap_window_pml2[512] PAGE_ALIGNED;
+#define WINDOW_VIRTUAL_ADDRESS (physical_map_base + physical_map_length)
 
 extern uintptr_t _start_physical;
 
+// Whether the cpu supports NX (no execute) pages. If it doesn't, we'll silently ignore the no execute flag
+bool no_execute_supported = false;
+
 // Private functions
 // Internal to this file only
-size_t page_size(uint table_level);
-uint64_t intermediate_page_flags(uint64_t leaf_flags);
-bool maybe_release_frame(page_table_entry *page_frame);
+
+static size_t page_size(uint table_level);
+static uint64_t intermediate_page_flags(uint64_t leaf_flags);
+static uint64_t leaf_page_flags(uint64_t flags);
+static bool maybe_release_frame(page_table_entry *page_frame);
+/// Split an entry in a table into a full, lower level table mapping the same memory
+static ir_status_t paging_split_page(page_table_entry *table_entry, uint table_level);
+static page_table_entry *paging_allocate_table();
 
 
 /// Create a new address space for the kernel to reside in,
 /// and map all of physical memory into kernel space
-void paging_init() {
+void paging_init(struct physical_region *memory_regions, size_t count) {
 
     // Initialize the pml4 with every kernel pml3 present so the addresses can be copied to any new address spaces
     for (int i = 0; i < 256; i++) {
-        kernel_pml4[i + 256] = ((uintptr_t)&kernel_pml3s[i] - KERNEL_VIRTUAL_ADDRESS) | PAGE_PRESENT | PAGE_GLOBAL;
+        kernel_pml4[i + 256] = ((uintptr_t)&kernel_pml3s[i] - KERNEL_VIRTUAL_ADDRESS) | PAGE_PRESENT | PAGE_GLOBAL | PAGE_WRITABLE;
     }
-
-    // Physical mapping to kernel space
-    // It is simplest to just map everything (up to 512gb) and protect regions as needed later
-    // TODO: Come back to this and take into account memory upper limit
-    page_table_entry *physical_map_pml3 = kernel_pml3s[ADDRESS_PML4_INDEX(physical_map_base) - 256];
-    p_addr_t physical_address = 0;
-    for (int i = 0; i < 512; i++) {
-        physical_map_pml3[i] = physical_address | PAGE_LARGE_PAGE | PAGE_PRESENT | PAGE_CACHE_DISABLE | PAGE_WRITABLE | PAGE_NO_EXECUTE | PAGE_GLOBAL;
-        physical_address += GIGABYTE_PAGE_SIZE;
-    }
-
-    // Add the map to the kernel address space
-    physical_address = (uintptr_t)physical_map_pml3 - KERNEL_VIRTUAL_ADDRESS;
-    physical_address &= PAGE_ADDRESS_MASK;
-    kernel_pml4[ADDRESS_PML4_INDEX(physical_map_base)] = physical_address | PAGE_PRESENT | PAGE_WRITABLE | PAGE_GLOBAL | PAGE_NO_EXECUTE;
 
     // Map the kernel itself into the address space
     // For now map everything with full permissions
     // Protection can be worked out later when more table levels can be allocated
     page_table_entry *kernel_pml3 = kernel_pml3s[ADDRESS_PML4_INDEX((uintptr_t)&_start_physical + KERNEL_VIRTUAL_ADDRESS) - 256];
-    physical_address = (uintptr_t)kernel_pml3 - KERNEL_VIRTUAL_ADDRESS;
-    physical_address &= PAGE_ADDRESS_MASK;
+    p_addr_t physical_address = (uintptr_t)kernel_pml3 - KERNEL_VIRTUAL_ADDRESS;
     kernel_pml4[ADDRESS_PML4_INDEX((uintptr_t)&_start_physical + KERNEL_VIRTUAL_ADDRESS)] = physical_address | PAGE_PRESENT | PAGE_WRITABLE | PAGE_GLOBAL;
 
     physical_address = (uintptr_t)&kernel_pml2 - KERNEL_VIRTUAL_ADDRESS;
-    physical_address &= PAGE_ADDRESS_MASK;
     kernel_pml3[ADDRESS_PML3_INDEX((uintptr_t)&_start_physical + KERNEL_VIRTUAL_ADDRESS)] = physical_address | PAGE_PRESENT | PAGE_CACHE_DISABLE | PAGE_WRITABLE | PAGE_GLOBAL;
 
     extern uintptr_t _end_physical;
@@ -127,6 +122,68 @@ void paging_init() {
     // With all physical memory mapped into the start of kernel space. However, there is little to no
     // Memory protection - all mapped memory (including physical reserved regions) are read/write, and all
     // kernel code/data is executable. Lower memory is no longer mapped.
+
+    // Build the physcial memory map
+
+
+    // Find an area to carve pages for building the physical map from
+    struct physical_region *largest_region = &memory_regions[0];
+    p_addr_t highest_physical_address = 0;
+    for (uint i = 0; i < count; i++) {
+        if (memory_regions[i].length > largest_region->length && memory_regions[i].type == REGION_TYPE_AVAILABLE) {
+            largest_region = &memory_regions[i];
+        }
+        if (memory_regions[i].type == REGION_TYPE_AVAILABLE &&
+                memory_regions[i].base + memory_regions[i].length > highest_physical_address) {
+            highest_physical_address = memory_regions[i].base + memory_regions[i].length;
+        }
+    }
+
+    debug_printf("Highest physical address is %#p\n", highest_physical_address);
+
+    // TOOD: Dynamic physical map size
+    if (highest_physical_address > physical_map_length) {
+        debug_print("FATAL: More than 512GB of RAM detected\n");
+        arch_pause();
+    }
+
+    // TODO: Make upper bound closer to the edge than a whole GB away
+    // Each PML2 holds 512 2MB pages, and rounding up a GB makes sure every entry in the PML2 is used to simplify mapping creation
+    size_t required_pml2s = ROUND_UP(highest_physical_address, GIGABYTE_PAGE_SIZE) / LARGE_PAGE_SIZE / 512;
+
+    debug_printf("Removing %ld pages off end of region %#p-%#p for creating physical map\n", required_pml2s, largest_region->base, largest_region->base + largest_region->length);
+    largest_region->length -= required_pml2s * PAGE_SIZE;
+
+    // Physical mapping to kernel space
+
+
+    kernel_pml3s[1][0] = ((uintptr_t)bootstrap_window_pml2 - KERNEL_VIRTUAL_ADDRESS) | PAGE_PRESENT | PAGE_WRITABLE | PAGE_GLOBAL;
+    page_table_entry *physical_map_pml3 = &kernel_pml3s[0][0];
+    p_addr_t pml2_address = largest_region->base + largest_region->length;
+    physical_address = 0;
+    for (uint i = 0; i < required_pml2s; i++) {
+        debug_printf("PML2 %d:\n", i);
+        physical_map_pml3[i] = pml2_address | PAGE_PRESENT | PAGE_WRITABLE | PAGE_GLOBAL;
+        // Provide a temporary window to access the pml2, since the physical map isn't finished yet
+        size_t offset_in_window = pml2_address % LARGE_PAGE_SIZE;
+        bootstrap_window_pml2[0] = (pml2_address & PAGE_2MB_ADDRESS_MASK) | PAGE_PRESENT | PAGE_LARGE_PAGE | PAGE_WRITABLE | PAGE_GLOBAL;
+        //debug_printf("Mapping window to %#p -> %#.16p | %#.16p\n", bootstrap_window_pml2[0], pml2_address, PAGE_PRESENT | PAGE_LARGE_PAGE | PAGE_WRITABLE | PAGE_GLOBAL);
+        asm volatile ("invlpg (%0)" : : "r" (WINDOW_VIRTUAL_ADDRESS) : "memory");
+
+        // Fill out the pml2 with 2MB pages
+        for (uint p = 0; p < 512; p++) {
+            //debug_printf("%d: %#p -> %#.16p | %#.16p\n", p, &((page_table_entry*)WINDOW_VIRTUAL_ADDRESS)[p], physical_address & PAGE_ADDRESS_MASK, PAGE_PRESENT | PAGE_LARGE_PAGE | PAGE_CACHE_DISABLE | PAGE_WRITABLE | PAGE_GLOBAL);
+            ((page_table_entry*)(WINDOW_VIRTUAL_ADDRESS + offset_in_window))[p] = physical_address | PAGE_PRESENT | PAGE_LARGE_PAGE | PAGE_CACHE_DISABLE | PAGE_WRITABLE | PAGE_GLOBAL;
+            physical_address += LARGE_PAGE_SIZE;
+
+            if (p == 510 && i == required_pml2s - 2) {
+                debug_print("Here\n");
+                paging_print_tables((uintptr_t)kernel_pml4 - KERNEL_VIRTUAL_ADDRESS, WINDOW_VIRTUAL_ADDRESS + offset_in_window);
+            }
+        }
+
+        pml2_address += PAGE_SIZE;
+    }
 
     // Pass on the table to the virtual memory manager, so kernel memory can be mapped at runtime
     address_space kernel_address_space;
@@ -174,7 +231,7 @@ ir_status_t arch_mmu_map(address_space *addr_space, v_addr_t address, size_t cou
         // Map each page individually
         // TODO: Not an efficient way to do this, but its simpler in the short term.
         // Crawls each level from scratch every time
-        ir_status_t status = paging_map_page(table, address, *p_addr_list, page_flags);
+        ir_status_t status = paging_map_page(table, address, *p_addr_list, page_flags, false);
         if (status != IR_OK ) {
             debug_printf("Paging: Error %d while mapping\n", status);
             return status; // Pass on any errors encountered whhile mapping
@@ -196,15 +253,27 @@ ir_status_t arch_mmu_map_contiguous(address_space *addr_space, v_addr_t address,
     // Map the pages
      page_table_entry *table = addr_space->table_base;
     for (size_t i = 0; i < count; i++) {
-        // Map each page individually
-        // TODO: Not an efficient way to do this, but its simpler in the short term.
-        ir_status_t status = paging_map_page(table, address, physical_address, page_flags);
-        if (status != IR_OK ) {
-            return status; // Pass on any errors encountered whhile mapping
+        if (address % LARGE_PAGE_SIZE == 0 && i - count >= LARGE_PAGE_SIZE / PAGE_SIZE) {
+            // Map a 2MB chunk all at once using a large page
+            ir_status_t status = paging_map_page(table, address, physical_address, page_flags, false);
+            if (status != IR_OK ) {
+                return status; // Pass on any errors encountered whhile mapping
+            }
+            address += LARGE_PAGE_SIZE;
+            physical_address += LARGE_PAGE_SIZE;
+            i += LARGE_PAGE_SIZE / PAGE_SIZE;
         }
+        else {
+            // Map each page individually
+            // TODO: Not an efficient way to do this, but its simpler in the short term.
+            ir_status_t status = paging_map_page(table, address, physical_address, page_flags, false);
+            if (status != IR_OK ) {
+                return status; // Pass on any errors encountered whhile mapping
+            }
 
-        address += PAGE_SIZE;
-        physical_address += PAGE_SIZE;
+            address += PAGE_SIZE;
+            physical_address += PAGE_SIZE;
+        }
     }
 
     return IR_OK;
@@ -274,7 +343,7 @@ ir_status_t paging_protect_page(page_table_entry *table, v_addr_t virtual_addres
     // Replace the permissions
     uint index = INDEX_AT_LEVEL(virtual_address, 0);
     p_addr_t physical_address = table[index] & PAGE_ADDRESS_MASK;
-    table[index] = physical_address | new_flags;
+    table[index] = physical_address | leaf_page_flags(new_flags);
 
     asm volatile ("invlpg (%0)" : : "r" (&virtual_address) : "memory");
 
@@ -282,12 +351,26 @@ ir_status_t paging_protect_page(page_table_entry *table, v_addr_t virtual_addres
 }
 
 // Map a single physical page to a virtual address space
-ir_status_t paging_map_page(page_table_entry *table, v_addr_t virtual_address, p_addr_t physical_address, uint64_t protection_flags) {
+ir_status_t paging_map_page(page_table_entry *table, v_addr_t virtual_address, p_addr_t physical_address, uint64_t protection_flags, bool use_2mb) {
     uint64_t intermediate_flags = intermediate_page_flags(protection_flags);
 
     // Work down from the PML4 (top of tables) down to the relevant leaf, updating permissions along the way
     for (uint level = 3; level > 0; level--) {
         uint index = INDEX_AT_LEVEL(virtual_address, level);
+
+        if(use_2mb && index == 1) {
+            if (IS_PRESENT(table[index]) && !IS_LARGE_PAGE(table[index])) {
+                // Release the page backing the existing mapping and overwrite it
+                page_table_entry *lower_table = (page_table_entry*)(table[index] & PAGE_ADDRESS_MASK);
+                pmm_free_page(pmm_page_from_p_addr((p_addr_t)lower_table));
+                // TODO: Do i need to invlpg the whole 2MB?
+                asm volatile ("invlpg (%0)" : : "r" (&virtual_address) : "memory");
+            }
+
+            table[index] = physical_address | leaf_page_flags(protection_flags) | PAGE_LARGE_PAGE;
+            asm volatile ("invlpg (%0)" : : "r" (&virtual_address) : "memory");
+            return IR_OK;
+        }
 
         // Break up any large pages in the way
         if (IS_LARGE_PAGE(table[index])) {
@@ -311,7 +394,7 @@ ir_status_t paging_map_page(page_table_entry *table, v_addr_t virtual_address, p
 
     // Map the physical page to the requested address
     uint index = ADDRESS_PML1_INDEX(virtual_address);
-    table[index] = physical_address | protection_flags;
+    table[index] = physical_address | leaf_page_flags(protection_flags);
 
     asm volatile ("invlpg (%0)" : : "r" (&virtual_address) : "memory");
     return IR_OK;
@@ -359,6 +442,8 @@ ir_status_t paging_unmap_page(page_table_entry *table, v_addr_t virtual_address)
 
         if (maybe_release_frame(table)) {
             levels[i+1][INDEX_AT_LEVEL(virtual_address, i+1)] = 0;
+            // Release the page backing the table
+            pmm_free_page(pmm_page_from_p_addr((p_addr_t)table));
         }
         // If we can't free this level we certainly can't free the next one
         else { break; }
@@ -370,7 +455,7 @@ ir_status_t paging_unmap_page(page_table_entry *table, v_addr_t virtual_address)
 }
 
 // Split an entry in a table into a full, lower level table mapping the same memory
-ir_status_t paging_split_page(page_table_entry *table_entry, uint table_level) {
+static ir_status_t paging_split_page(page_table_entry *table_entry, uint table_level) {
     // Create the new table (with smaller individual page sizes for more fine permissions)
     page_table_entry *new_table = paging_allocate_table();
     if (new_table == NULL) {
@@ -388,7 +473,7 @@ ir_status_t paging_split_page(page_table_entry *table_entry, uint table_level) {
 
     size_t smaller_page_size = page_size(table_level - 1);
     for (uint i = 0; i < 512; i++) {
-        new_table[i] = address | flags;
+        new_table[i] = address | leaf_page_flags(flags);
         address += smaller_page_size;
     }
 
@@ -404,7 +489,7 @@ ir_status_t paging_split_page(page_table_entry *table_entry, uint table_level) {
 // Allocate and return new page table for use in the paging system
 // The returned pointer is a virtual address in the physical map
 // Because the page info isn't stored anywhere, use pmm_page_from_p_addr when it comes time to free it
-page_table_entry *paging_allocate_table() {
+static page_table_entry *paging_allocate_table() {
 
     // Page tables are the same size as pages, so pop one from the pmm and use it directly
     physical_page_info *page = NULL;
@@ -428,7 +513,7 @@ page_table_entry *paging_allocate_table() {
     return NULL;
 }
 
-uint64_t intermediate_page_flags(uint64_t leaf_flags) {
+static uint64_t intermediate_page_flags(uint64_t leaf_flags) {
     // Strip no execute flag from upper levels of the table.
     // Intel manual Vol. 3A 4-35: a no-execute flag at a higher level will prevent
     // all pages underneath from executing instructions, whereas write access requires
@@ -438,7 +523,15 @@ uint64_t intermediate_page_flags(uint64_t leaf_flags) {
     return leaf_flags & ~(PAGE_NO_EXECUTE | PAGE_CACHE_DISABLE | PAGE_WRITE_THROUGH);
 }
 
-size_t page_size(uint table_level) {
+static uint64_t leaf_page_flags(uint64_t flags) {
+    if (no_execute_supported) {
+        return flags;
+    } else {
+        return flags & ~PAGE_NO_EXECUTE;
+    }
+}
+
+static size_t page_size(uint table_level) {
     if (table_level == 0) {
         return PAGE_SIZE; // 4 KB
     }
@@ -458,7 +551,7 @@ size_t page_size(uint table_level) {
 /// @brief Free a page frame if all the entries inside are empty
 /// @param page_frame Pointer to a page frame that might need to be freed
 /// @return Whether the page frame was freed
-bool maybe_release_frame(page_table_entry *page_frame) {
+static bool maybe_release_frame(page_table_entry *page_frame) {
     // If there is even a single page still mapped in here we can't remove it
     for (int i = 0; i < 512; i++) {
         // Checking the entry as a whole, not the present flag, so swapped
@@ -470,4 +563,35 @@ bool maybe_release_frame(page_table_entry *page_frame) {
     pmm_free_page(page);
     debug_printf("Released page table @ %#p\n", page_frame);
     return true; // The caller should remove pointers to the frame
+}
+
+void paging_print_tables(uintptr_t table_root, v_addr_t target) {
+
+    page_table_entry *table = (page_table_entry*)p_addr_to_physical_map(table_root);
+    debug_printf("Page table dump for %#p:\n", target);
+
+    for (int i = 3; i > 0; i--) {
+        int index = INDEX_AT_LEVEL(target, i);
+        debug_printf("Level %d: %#p: Address=%#p, flags=%#lx\n", i, table[index], table[index] & PAGE_ADDRESS_MASK, table[index] & ~PAGE_ADDRESS_MASK);
+
+        if (!IS_PRESENT(table[index])) {
+            debug_print("Page not mapped\n");
+            return;
+        }
+
+        if (IS_LARGE_PAGE(table[index])) {
+            debug_printf("Large page: Physical address = %#p\n", table[index] & PAGE_ADDRESS_MASK);
+            return;
+        }
+
+        table = (page_table_entry*)p_addr_to_physical_map((uintptr_t)table[index] & PAGE_ADDRESS_MASK);
+    }
+
+    int index = ADDRESS_PML1_INDEX(target);
+
+    if (!IS_PRESENT(table[index])) {
+        debug_print("Page not mapped\n");
+        return;
+    }
+    debug_printf("Physical address = %#p\n", table[index] & PAGE_ADDRESS_MASK);
 }

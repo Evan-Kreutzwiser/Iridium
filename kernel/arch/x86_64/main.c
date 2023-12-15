@@ -17,14 +17,20 @@
 #include "arch/x86_64/msr.h"
 #include "arch/x86_64/acpi.h"
 #include "arch/debug.h"
+#include "align.h"
 #include <cpuid.h>
 #include <stdbool.h>
 #include <stdnoreturn.h>
 
+#define CPUID_FEATURE_LEAF 1
 #define CPUID_EDX_PSE (1 << 3)
 #define CPUID_EDX_PAE (1 << 6)
 #define CPUID_EDX_PGE (1 << 13)
 #define CPUID_EDX_PAT (1 << 16)
+#define CPUID_EDX_NX (1 << 20)
+
+#define CPUID_EXTENTED_FEATURE_LEAF 0x80000001
+#define CPUID_EXTENDED_EDX_1G (1 << 26)
 
 multiboot_info_t *multiboot_struct;
 
@@ -51,9 +57,11 @@ static void early_get_physical_memory_regions(struct multiboot_info *multiboot_i
     // Copy every memory map entry into the kernel's list
     struct multiboot_mmap_entry *entry = memory_map;
     for (uint i = 0; i < regions_count; i++) {
-
-        physical_memory_regions[i].base = entry->addr;
-        physical_memory_regions[i].length = entry->len;
+        // Round the regions inwards to full pages, since thats the smallest granuality we can work with.
+        p_addr_t old_base = entry->addr;
+        p_addr_t old_end = old_base + entry->len;
+        physical_memory_regions[i].base = ROUND_UP_PAGE(old_base);
+        physical_memory_regions[i].length = ROUND_DOWN_PAGE(old_end) - ROUND_UP_PAGE(old_base);
 
         // Translate mulitboot memory type to a generic type
         if (entry->type == MULTIBOOT_MEMORY_AVAILABLE) {
@@ -65,6 +73,8 @@ static void early_get_physical_memory_regions(struct multiboot_info *multiboot_i
         } else {
             physical_memory_regions[i].type = REGION_TYPE_UNUSABLE;
         }
+
+        debug_printf("Type %d memory region from %#lx to %#lx\n", physical_memory_regions[i].type, physical_memory_regions[i].base, physical_memory_regions[i].base+ physical_memory_regions[i].length);
 
         entry++;
     }
@@ -90,7 +100,7 @@ void arch_main(p_addr_t multiboot_struct_physical) {
     init_tss();
 
     unsigned int eax, ebx, ecx, edx;
-    __get_cpuid(1, &eax, &ebx, &ecx, &edx);
+    __get_cpuid(CPUID_FEATURE_LEAF, &eax, &ebx, &ecx, &edx);
     debug_printf("CPUID feature leaf is %#lx\n", (uint64_t)(ecx) << 32 | edx);
     if (edx & CPUID_EDX_PGE) {
         debug_print("Has PGE\n");
@@ -104,9 +114,20 @@ void arch_main(p_addr_t multiboot_struct_physical) {
     if (edx & CPUID_EDX_PAE) {
         debug_print("Has PAE\n");
     }
+    if (edx & CPUID_EDX_NX) {
+        debug_print("Has NX\n");
+        // Tell the paging system its allowed to use the feature
+        no_execute_supported = true;
+    }
+
+    __get_cpuid(CPUID_EXTENTED_FEATURE_LEAF, &eax, &ebx, &ecx, &edx);
+    debug_printf("CPUID extended feature leaf is %#lx\n", (uint64_t)(ecx) << 32 | edx);
+    if (edx & CPUID_EXTENDED_EDX_1G) {
+        debug_print("1G pages supported\n");
+    }
 
     // Create the physical map in kernel space
-    paging_init();
+    paging_init(physical_memory_regions, regions_count);
     // Memory is no longer identity mapped, so access the multiboot info through
     // the physical memory map instead
     multiboot_struct = (multiboot_info_t*)p_addr_to_physical_map(multiboot_struct_physical);

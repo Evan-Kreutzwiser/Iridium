@@ -6,19 +6,21 @@
 #include <stddef.h>
 #include <iridium/types.h>
 #include <types.h>
+#include <stdbool.h>
 
 typedef uint64_t page_table_entry;
 
-// Setup the physical map and kernel mappings
-void paging_init(void);
+extern bool no_execute_supported;
 
-ir_status_t paging_map_page(page_table_entry *table, v_addr_t virtual_address, p_addr_t physical_address, uint64_t protection_flags);
+struct physical_region; // Defined in kernel/memory/pmm.h
+
+// Setup the physical map and kernel mappings
+void paging_init(struct physical_region *memory_regions, size_t count);
+
+ir_status_t paging_map_page(page_table_entry *table, v_addr_t virtual_address, p_addr_t physical_address, uint64_t protection_flags, bool paging_map_page);
 ir_status_t paging_protect_page(page_table_entry *table, v_addr_t virtual_address, uint64_t protection_flags);
 ir_status_t paging_unmap_page(page_table_entry *table, v_addr_t virtual_address);
 
-// Split an entry in a table into a full, lower level table mapping the same memory
-ir_status_t paging_split_page(page_table_entry *table_entry, uint table_level);
-
-page_table_entry *paging_allocate_table();
+void paging_print_tables(uintptr_t table_root, v_addr_t target);
 
 #endif // ARCH_X86_64_PAGING_H_
