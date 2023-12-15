@@ -1,6 +1,8 @@
 #ifndef ARCH_X86_64_ACPI_H_
 #define ARCH_X86_64_ACPI_H_
 
+#include "arch/debug.h"
+
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -33,17 +35,15 @@ struct acpi_header {
     uint32_t creator_revision;
 } __attribute__((packed));
 
-// There is padding between the header and array to align accesses
 struct rsdt {
     struct acpi_header header;
     uint32_t sdt_pointers[];
-};
+} __attribute__((packed));
 
-// There is padding between the header and array to align accesses
 struct xsdt {
     struct acpi_header header;
     uint64_t sdt_pointers[];
-};
+} __attribute__((packed));
 
 // This struct is followed by entries describing APICs
 struct acpi_madt {
