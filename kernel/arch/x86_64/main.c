@@ -40,6 +40,12 @@ multiboot_info_t *multiboot_struct;
 #define MAX_MEMORY_REGIONS 32
 struct physical_region physical_memory_regions[MAX_MEMORY_REGIONS];
 
+struct arch_reserved_range reserved_memory_regions[2];
+
+// Points to the array of memory ranges arch code wants reserved
+extern struct arch_reserved_range *reserved_ranges;
+extern size_t reserved_ranges_count;
+
 /// @brief Pass the computer's physical memory regions on the the physical memory manager.
 /// @note This was moved to a seperate function so that `kernel_startup` can create a
 ///       bootstrap heap that this can dynamically allocate the region list on.
@@ -93,8 +99,6 @@ void arch_main(p_addr_t multiboot_struct_physical) {
 
     early_get_physical_memory_regions((struct multiboot_info*)multiboot_struct_physical, &regions_array, &regions_count);
 
-    debug_printf("multiboot struct @ %#p\n", multiboot_struct_physical);
-
     // Set up exception handlers
     idt_init();
     init_tss();
@@ -132,6 +136,31 @@ void arch_main(p_addr_t multiboot_struct_physical) {
     // the physical memory map instead
     multiboot_struct = (multiboot_info_t*)p_addr_to_physical_map(multiboot_struct_physical);
 
+
+    // Find regions we want protected and tell the pmm to save them for us while it initalizes
+    // such as the initrd file
+
+    if (!(multiboot_struct->flags & MULTIBOOT_INFO_MODS) || multiboot_struct->mods_count == 0) {
+        debug_print("Init ramdisk not provided. Cannot boot.\n");
+        arch_pause();
+    }
+
+    // Expect the init file to be the first module loaded
+    const struct multiboot_mod_list *module_list = (struct multiboot_mod_list*)(multiboot_struct->mods_addr + physical_map_base);
+    p_addr_t init_module_start = module_list[0].mod_start;
+    size_t init_module_length = module_list[0].mod_end - module_list[0].mod_start;
+
+    debug_printf("Initrd.sys @ %#p, %#zx bytes long\n", init_module_start, init_module_length);
+    reserved_memory_regions[0].base = init_module_start;
+    reserved_memory_regions[0].length = init_module_length;
+
+    debug_printf("Multiboot struct @ %#p\n", multiboot_struct_physical);
+    reserved_memory_regions[1].base = multiboot_struct_physical;
+    reserved_memory_regions[1].length = sizeof(struct multiboot_info);
+
+    reserved_ranges = reserved_memory_regions;
+    reserved_ranges_count = 2;
+
     // Generic startup tasks
     // After this we can use heap methods and memory mapping
     kernel_startup();
@@ -149,42 +178,6 @@ void arch_main(p_addr_t multiboot_struct_physical) {
         debug_printf("No framebuffer provided\n");
     }
 
-    //extern v_addr_t framebuffer;
-    //memset((void*)framebuffer, 0x128, 100);
-
-    if (!(multiboot_struct->flags & MULTIBOOT_INFO_MODS) || multiboot_struct->mods_count == 0) {
-        debug_print("Init ramdisk not provided. Cannot boot.\n");
-        arch_pause();
-    }
-
-    // Expect the init tarball to be the first module loaded
-    const struct multiboot_mod_list *module_list = (struct multiboot_mod_list*)(multiboot_struct->mods_addr + physical_map_base);
-    p_addr_t init_module_start = module_list[0].mod_start;
-    size_t init_module_length = module_list[0].mod_end - module_list[0].mod_start;
-
-    debug_printf("Initrd.sys @ %#p, %#zx bytes long\n", init_module_start, init_module_length);
-
-    vm_object *multiboot_data;
-    ir_status_t status = vm_object_create_physical(multiboot_struct_physical, sizeof(multiboot_struct), VM_READABLE | VM_EXECUTABLE, &multiboot_data);
-    if (status != IR_OK) {
-        debug_printf("Multiboot struct vm object creation returned status %d\n", status);
-    }
-
-    vm_object *initrd_vm;
-    status = vm_object_create_physical(init_module_start, init_module_length, VM_READABLE | VM_EXECUTABLE, &initrd_vm);
-    if (status != IR_OK) {
-        debug_printf("Initrd vm object creation returned status %d\n", status);
-    }
-
-    v_addr_t initrd_address;
-    status = v_addr_region_map_vm_object(kernel_region, VM_READABLE | VM_WRITABLE, initrd_vm, NULL, 0, &initrd_address);
-    if (status != IR_OK) {
-        debug_printf("Initrd address region creation returned status %d\n", status);
-    }
-
-    //extern int fb_pitch;
-    //memset((void*)(framebuffer + (fb_pitch*12)), 0x228, 80);
-
     // Read acpi tables for hardware information
     // Such as the number of CPUs
     acpi_init();
@@ -195,19 +188,14 @@ void arch_main(p_addr_t multiboot_struct_physical) {
     // Gather processor information and initialize APs
     smp_init();
 
-
-    //memset((void*)(framebuffer + (fb_pitch*42)), 0x058, 80);
-
     // Run the init process and other final setup
-    kernel_main(initrd_vm, initrd_address);
+    kernel_main(init_module_start + physical_map_base);
 }
 
 void arch_set_cpu_local_pointer(struct per_cpu_data* cpu_local_data) {
     wrmsr(MSR_GS_BASE, (uint64_t)cpu_local_data);
     wrmsr(MSR_KERNEL_GS_BASE, (uint64_t)cpu_local_data);
     asm volatile ("swapgs");
-
-    debug_printf("GS MSRs set to %#p and %#p\n");
 }
 
 

@@ -40,9 +40,8 @@ int strcmp(const char *str1, const char *str2) {
     }
 }
 
-// TODO: This should compare at MOST n bytes, but also stop at a null terminator
 int strncmp(const char *str1, const char *str2, size_t n) {
-    while (*str1 == *str2 && n) {
+    while (*str1 == *str2 && n && *str1 != '\0' && *str2 != '\0') {
         str1++;
         str2++;
         n--;

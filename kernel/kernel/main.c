@@ -42,7 +42,7 @@ void kernel_startup() {
 ///
 /// @param initrd `vm_object` containing the initrd.sys file contents
 /// @param initrd_start_address Address of `initrd` mapped into kernel virtual memory
-void kernel_main(vm_object *initrd, v_addr_t initrd_start_address) {
+void kernel_main(v_addr_t initrd_start_address) {
     debug_printf("Initrd.sys at %#p\n", initrd_start_address);
 
     create_idle_process();

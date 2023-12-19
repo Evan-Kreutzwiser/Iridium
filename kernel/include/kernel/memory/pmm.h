@@ -48,6 +48,20 @@ struct physical_region {
     region_type_t type;
 };
 
+/// @brief A range of memory requested by architecture entry point to prevent unexpected reuse.
+///
+/// Exists because the kernel startup function would initialize all memory subsystems at once
+/// and make use of dynamic allocation before architecture code gets another change to run, and
+/// important data may have been overwritten before it could make the relevant vm_objects.
+struct arch_reserved_range {
+    p_addr_t base;
+    /// Size of the region in bytes
+    size_t  length;
+    /// Linked list of pages encompasing the range. These pages will not be used for anything
+    /// else unless freed by arch code.
+    struct physical_page_info *pages;
+};
+
 // Main allocation functions
 ir_status_t pmm_allocate_page(physical_page_info **page_out);
 ir_status_t pmm_allocate_pages(size_t count, physical_page_info **page_list_out);

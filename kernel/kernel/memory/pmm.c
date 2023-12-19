@@ -40,6 +40,10 @@ static char *region_type_strings[] = {
     [REGION_TYPE_UNUSABLE] = "unusable"
 };
 
+/// Architecture specific code can populate this array to reserve regions during pmm initialization
+struct arch_reserved_range *reserved_ranges;
+size_t reserved_ranges_count;
+
 // A linked list containing every free page of memory in the system
 // Serves as a stack for popping physical pages to allocate
 // Pages are pushed and popped to the begining stored here
@@ -92,6 +96,16 @@ void physical_memory_init() {
         initialized_regions++;
     }
 
+    // Reserve ranges requested by architecture code, so that the heap and virtual memory manager
+    // don't accidentally overwrite them while initalizing themselves
+    for (uint i = 0; i < reserved_ranges_count; i++) {
+        struct arch_reserved_range *range = &reserved_ranges[i];
+        ir_status_t status = pmm_allocate_range(range->base, range->length, &range->pages);
+        if (status) {
+            debug_printf("Failed to reserve arch-requested region %#p-%#p - error %d\n", range->base, range->base + range->length, status);
+        }
+        debug_printf("Reserved arch range %#p-%#p\n", range->base, range->base + range->length);
+    }
 
     debug_printf("Computer has %#zx bytes of available memory\n", memory_free + memory_used);
 
@@ -274,10 +288,8 @@ ir_status_t pmm_allocate_contiguous(size_t count, p_addr_t physical_upper_limit,
     // Goes backwards to avoid allocating important space in the first 16MB and around the kernel (Where grub will put the init process)
     // TODO: Figure out a way to make this unnecessary, but continue doing it anyway to safe space for lower limit requests
 
-
-    for (uint r = 0; r < initialized_regions; r++) { // initialized_regions instead of overall because the init
-                                                         // function can call this to get page arrays for reserved regions
-
+    for (int r = initialized_regions-1; r >= 0; r--) { // initialized_regions instead of overall because the init
+                                                       // function can call this to get page arrays for reserved regions
         region = &regions_array[r];
         size_t pages = region->length / PAGE_SIZE;
 
@@ -332,9 +344,9 @@ ir_status_t pmm_allocate_range(p_addr_t address, size_t length, physical_page_in
     }
     // Round start and end bounds outwards to ensure the region is encompased by whole pages
     p_addr_t old_base = address;
-    address = ROUND_UP_PAGE(old_base);
+    address = ROUND_DOWN_PAGE(old_base);
     p_addr_t old_end = old_base + length;
-    length = ROUND_DOWN_PAGE(old_end) - address;
+    length = ROUND_UP_PAGE(old_end) - address;
 
     size_t page_count =  length / PAGE_SIZE;
 
