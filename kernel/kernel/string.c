@@ -41,20 +41,15 @@ int strcmp(const char *str1, const char *str2) {
 }
 
 int strncmp(const char *str1, const char *str2, size_t n) {
-    while (*str1 == *str2 && n && *str1 != '\0' && *str2 != '\0') {
-        str1++;
-        str2++;
+    const unsigned char *s1 = (const unsigned char *)str1;
+    const unsigned char *s2 = (const unsigned char *)str2;
+
+    while ((*s1 == *s2) && n && *s1 != '\0') {
+        s1++;
+        s2++;
         n--;
     }
-    if (n == 0) {
-        return n;
-    }
-    else if (*str1 < *str2) {
-        return -1;
-    }
-    else {
-        return 1;
-    }
+    return *s1 - *s2;
 }
 
 // Copy a section of memory from one location to another

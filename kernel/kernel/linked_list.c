@@ -22,7 +22,7 @@
 /// from a list is the most common use case.
 /// @param data Element from the linked list
 /// @param target Data being searched for or inserted
-/// @return A negative value if `data` is smaller, positive if `target` is larger, or 0 if they are equal
+/// @return A negative value if `target` is larger, positive if `data` is larger, or 0 if they are equal
 int default_search(void *data, void *target) {
     return (uintptr_t)data - (uintptr_t)target;
 }

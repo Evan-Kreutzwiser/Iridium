@@ -52,14 +52,14 @@
 #define IO_APIC_VERSION_REGISTER 1
 #define IO_APIC_REDIRECTION_TABLE_BASE 0x10
 
-struct acpi_rsdp_v2 *rsdp = NULL;
-struct acpi_madt *madt = NULL;
-struct acpi_header *fadt = NULL;
-struct acpi_header *srat = NULL;
-struct acpi_header *ssdt = NULL;
+const struct acpi_rsdp_v2 *rsdp = NULL;
+const struct acpi_madt *madt = NULL;
+const struct acpi_header *fadt = NULL;
+const struct acpi_header *srat = NULL;
+const struct acpi_header *ssdt = NULL;
 
-uintptr_t local_apic_mmio_base;
-vm_object *local_apic_mmio_vm_object;
+static uintptr_t local_apic_mmio_base;
+static vm_object *local_apic_mmio_vm_object;
 
 struct io_apic_info {
     uintptr_t address;
@@ -67,14 +67,12 @@ struct io_apic_info {
     uint entry_count;
 };
 
-struct v_addr_region* io_apic_mmio_v_addr_region;
-v_addr_t io_apic_mmio_address;
-struct io_apic_info *io_apics;
-int io_apic_count;
-int io_apic_max_entries;
-bool *io_apic_entries_used;
+static struct v_addr_region* io_apic_mmio_v_addr_region;
+static v_addr_t io_apic_mmio_address;
+static struct io_apic_info *io_apics;
+static int io_apic_count;
 
-static void record_acpi_table_address(struct acpi_header* table) {
+static void record_acpi_table_address(const struct acpi_header* table) {
     if (strncmp(table->signature, "APIC", 4) == 0) {
         madt = (struct acpi_madt*)table;
     }
@@ -90,19 +88,36 @@ static void record_acpi_table_address(struct acpi_header* table) {
 }
 
 static void find_acpi_tables() {
-    char *physical_memory = (char *)physical_map_base;
     // Search the first MB of ram for the RSDP
-    for (int i = 0; i < 0x100000; i += 16) {
-        if (strncmp(&physical_memory[i], ACPI_RSDP_SIGNATURE, 8) == 0) {
-            rsdp = (void *)(physical_map_base + i);
-            break;
+    // Some computers have memory holes in this area and crash when trying to read from them,
+    // so only scan in areas covered by provided memory regions (whether available or not).
+    // Discovered while testing in virtualbox and a triple fault occured accessing a very
+    // small hole around 0xa0000.
+    extern struct physical_region *regions_array;
+    extern size_t regions_count;
+    for (uint r = 0; r < regions_count; r++) {
+        if (regions_array[r].base < 0x100000 && regions_array[r].type == REGION_TYPE_AVAILABLE) {
+            volatile char *physical_memory = (volatile char *)(physical_map_base + regions_array[r].base);
+            for (uint i = 0; i < regions_array[r].length; i += 16) {
+                if (strncmp((const char*)&physical_memory, ACPI_RSDP_SIGNATURE, 8) == 0) {
+                    rsdp = (void *)(physical_memory);
+                    break;
+                }
+                *physical_memory += 16;
+            }
         }
+
+        if (rsdp) {break;}
     }
 
     if (!rsdp) {
         debug_printf("WARNGING: Failed to find rsdp!\n");
+        asm volatile ("ud2");
         return;
     }
+
+    debug_printf("Found RSDP @ %#p\n", rsdp);
+
 
     if (rsdp->revision < 2) {
         // Use RSDT for 32 bit addresses
@@ -115,7 +130,7 @@ static void find_acpi_tables() {
         // Iterate through all the tables saving addresses for the ones we need
         int count = (rsdt->header.length - sizeof(struct acpi_header)) / 4;
         for (int i = 0; i < count; i++) {
-            struct acpi_header *table = (void*)(rsdt->sdt_pointers[i] + physical_map_base);
+            const struct acpi_header *table = (struct acpi_header *)(rsdt->sdt_pointers[i] + physical_map_base);
             if (acpi_checksum(table)) {
                 debug_printf("Found \"%c%c%c%c\" @ %#p, %#zx bytes\n", table->signature[0], table->signature[1], table->signature[2], table->signature[3], table, table->length);
                 record_acpi_table_address(table);
@@ -123,14 +138,14 @@ static void find_acpi_tables() {
         }
     } else {
         // Version 2, use XSDT for 64 bit addresses
-        struct xsdt *xsdt = (struct xsdt*)(rsdp->xsdt_address + physical_map_base);
+        const struct xsdt *xsdt = (struct xsdt*)(rsdp->xsdt_address + physical_map_base);
         if (!acpi_checksum(&xsdt->header)) {
             debug_print("WARNING: XSDT checksum is invalid!\n");
         }
 
         debug_printf("XSDT @ %#p\n", xsdt);
         // Iterate through all the tables saving addresses for the ones we need
-        int count = (xsdt->header.length - sizeof(struct acpi_header)) / 8;
+        const int count = (xsdt->header.length - sizeof(struct acpi_header)) / 8;
         for (int i = 0; i < count; i++) {
             struct acpi_header *table = (void*)(xsdt->sdt_pointers[i] + physical_map_base);
             if (acpi_checksum(table)) {
@@ -144,12 +159,12 @@ static void find_acpi_tables() {
 
 /// Read a value from the apic's mmio registers
 static inline long apic_io_input(int register_offset) {
-    return *(int*)(local_apic_mmio_base + register_offset);
+    return *(volatile int*)(local_apic_mmio_base + register_offset);
 }
 
 /// Write a value to the apic's mmio registers
 static inline void apic_io_output(int register_offset, int value) {
-    *(int*)(local_apic_mmio_base + register_offset) = value;
+    *(volatile int*)(local_apic_mmio_base + register_offset) = value;
 }
 
 void apic_send_eoi() {
@@ -202,6 +217,8 @@ void apic_init() {
 uint64_t timer_ticks = 0; // 100 = 1 second
 void timer_fired(struct registers* context) {
     timer_ticks++;
+
+    debug_printf("Stack entering switch: %#p\n", context->rsp);
 
     if (timer_ticks % 4 == 0) {
         //arch_enter_critical();

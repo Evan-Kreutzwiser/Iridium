@@ -7,7 +7,7 @@ struct thread; // #include "kernel/process.h"
 
 struct per_cpu_data {
     // Note: Be take care to update the offset in the x86_64 syscall entry point if current_thread moves or is changed
-    struct thread *current_thread;
+    struct thread *volatile current_thread;
     struct thread *idle_thread;
     int core_id;
     struct arch_per_cpu_data arch;
@@ -15,7 +15,7 @@ struct per_cpu_data {
 
 #ifdef __x86_64__
 // Accessing this reads from the location set in GS on x86_64, which will be different for every core
-static struct per_cpu_data __seg_gs * const this_cpu;
+static struct per_cpu_data __seg_gs * const this_cpu = 0;
 #endif
 
 // Stored in process.c

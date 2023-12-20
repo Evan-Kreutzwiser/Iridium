@@ -15,16 +15,15 @@
 static char hex_characters[] = "0123456789abcdef";
 static char hex_characters_capital[] = "0123456789ABCDEF";
 
-static void outb(uint16_t port, uint8_t data) {
-    asm volatile ("outb %0, %1" : : "a"(data), "Nd"(port));
+static inline void outb(uint16_t port, uint8_t data) {
+    asm volatile ("outb %0, %1" : : "a"(data), "d"(port));
 }
 
 // Check if the serial chip is ready to transmit data
-static int debug_is_transmit_empty() {
+static inline int debug_is_transmit_empty() {
     uint8_t volatile data;
-    asm volatile ("inb %%dx,%%al":"=a" (data) : "d" (SERIAL_BASE_PORT + 5));
+    asm volatile ("inb %1, %%al":"=a" (data) : "d" (SERIAL_BASE_PORT + 5));
     return data & 0x20;
-    //return 1;
 }
 
 // Set up the serial port
@@ -382,4 +381,6 @@ void debug_printf(const char *restrict format, ...) {
 
         format++;
     }
+
+    va_end(args);
 }

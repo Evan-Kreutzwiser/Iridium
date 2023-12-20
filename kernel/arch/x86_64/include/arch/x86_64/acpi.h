@@ -95,7 +95,7 @@ struct local_apic_nmi {
 } __attribute__((packed));
 
 
-static inline bool acpi_checksum(struct acpi_header *header) {
+static inline bool acpi_checksum(const struct acpi_header *header) {
     unsigned char sum = 0;
     char *data = (char*)header;
     for (unsigned int i = 0; i < header->length; i++) {

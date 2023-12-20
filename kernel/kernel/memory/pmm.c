@@ -47,19 +47,19 @@ size_t reserved_ranges_count;
 // A linked list containing every free page of memory in the system
 // Serves as a stack for popping physical pages to allocate
 // Pages are pushed and popped to the begining stored here
-static physical_page_info *free_list = NULL;
-static size_t pages_in_free_list = 0; // Used to optimize checks before multi-page allocations
+static physical_page_info *volatile free_list = NULL;
+static volatile size_t pages_in_free_list = 0; // Used to optimize checks before multi-page allocations
 
 /// @brief Total amount of free memory in the system
-size_t memory_free = 0;
+volatile size_t memory_free = 0;
 /// @brief Total memory used by the kernel and all processes combined
-size_t memory_used = 0;
+volatile size_t memory_used = 0;
 
 /// @brief Memory marked as reserved or unavailable.
 /// This memory cannot be used by conventional processes but
 /// range allocations can still be performed from the memory
 /// in case mmio regions or ports require it
-size_t memory_reserved = 0;
+volatile size_t memory_reserved = 0;
 
 #define PAGE_INDEX_IN_REGION(address, region_base) (((uintptr_t)(address) - (region_base)) / PAGE_SIZE)
 

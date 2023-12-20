@@ -71,6 +71,8 @@ ir_status_t sys_ioport_create(unsigned long vector, size_t count, ir_handle_t *o
     struct process *process = (struct process*)this_cpu->current_thread->object.parent;
     struct handle *handle;
     status = handle_create(process, (object*)ports, IR_RIGHT_INFO | IR_RIGHT_TRANSFER | IR_RIGHT_DUPLICATE, &handle);
+    if (status != IR_OK) return status;
+
     linked_list_add(&process->handle_table, handle);
     // Does not need the handle table lock, because this does not reference existing handles that must remain alive
 

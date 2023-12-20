@@ -103,7 +103,7 @@ void arch_main(p_addr_t multiboot_struct_physical) {
     idt_init();
     init_tss();
 
-    unsigned int eax, ebx, ecx, edx;
+    unsigned int eax=0, ebx=0, ecx=0, edx=0;
     __get_cpuid(CPUID_FEATURE_LEAF, &eax, &ebx, &ecx, &edx);
     debug_printf("CPUID feature leaf is %#lx\n", (uint64_t)(ecx) << 32 | edx);
     if (edx & CPUID_EDX_PGE) {

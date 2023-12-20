@@ -312,7 +312,7 @@ ir_status_t sys_v_addr_region_create(ir_handle_t parent, size_t length, uint64_t
         return IR_ERROR_WRONG_TYPE;
     }
 
-    struct v_addr_region *parent_region = NULL;
+    struct v_addr_region *parent_region = (struct v_addr_region*)parent_handle->object;
 
     struct v_addr_region *child;
     v_addr_t address;
