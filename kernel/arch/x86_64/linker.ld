@@ -27,6 +27,7 @@ SECTIONS
     {
         _TEXT_START_ = .;
         *(.text)
+        *(.text*)
         . = ALIGN(4096);
         _TEXT_END_ = .;
     }
@@ -35,6 +36,7 @@ SECTIONS
     {
         _DATA_START_ = .;
         *(.data)
+        *(.data*)
         . = ALIGN(4096);
         _DATA_END_ = .;
     }
@@ -43,6 +45,7 @@ SECTIONS
     {
         _RODATA_START_ = .;
         *(.rodata)
+        *(.rodata*)
         . = ALIGN(4096);
         _RODATA_END_ = .;
     }
