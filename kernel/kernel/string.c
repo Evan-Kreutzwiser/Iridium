@@ -23,32 +23,27 @@ int strcmp(const char *str1, const char *str2) {
     const unsigned char *string1 = (const unsigned char *)str1;
     const unsigned char *string2 = (const unsigned char *)str2;
 
-    while (*string1 == *string2) {
-        if (* string1 == 0) { // When both strings end at the same time
-            return 0;
-        }
-
+    while (*string1 == *string2 && *string1 != '\0') {
         string1++;
         string2++;
     }
 
-    if (*string1 < *string2) {
-        return -1;
-    }
-    else {
-        return 1;
-    }
+    return *string1 - *string2;
 }
 
 int strncmp(const char *str1, const char *str2, size_t n) {
     const unsigned char *s1 = (const unsigned char *)str1;
     const unsigned char *s2 = (const unsigned char *)str2;
 
-    while ((*s1 == *s2) && n && *s1 != '\0') {
+    while (n && (*s1 == *s2) && *s1 != '\0') {
         s1++;
         s2++;
         n--;
     }
+    if (n == 0) {
+        return 0;
+    }
+
     return *s1 - *s2;
 }
 
