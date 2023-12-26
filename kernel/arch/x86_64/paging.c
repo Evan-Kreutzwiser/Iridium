@@ -162,7 +162,6 @@ void paging_init(struct physical_region *memory_regions, size_t count) {
     p_addr_t pml2_address = largest_region->base + largest_region->length;
     physical_address = 0;
     for (uint i = 0; i < required_pml2s; i++) {
-        debug_printf("PML2 %d:\n", i);
         physical_map_pml3[i] = pml2_address | PAGE_PRESENT | PAGE_WRITABLE | PAGE_GLOBAL;
         // Provide a temporary window to access the pml2, since the physical map isn't finished yet
         size_t offset_in_window = pml2_address % LARGE_PAGE_SIZE;
@@ -175,15 +174,13 @@ void paging_init(struct physical_region *memory_regions, size_t count) {
             //debug_printf("%d: %#p -> %#.16p | %#.16p\n", p, &((page_table_entry*)WINDOW_VIRTUAL_ADDRESS)[p], physical_address & PAGE_ADDRESS_MASK, PAGE_PRESENT | PAGE_LARGE_PAGE | PAGE_CACHE_DISABLE | PAGE_WRITABLE | PAGE_GLOBAL);
             ((page_table_entry*)(WINDOW_VIRTUAL_ADDRESS + offset_in_window))[p] = physical_address | PAGE_PRESENT | PAGE_LARGE_PAGE | PAGE_CACHE_DISABLE | PAGE_WRITABLE | PAGE_GLOBAL;
             physical_address += LARGE_PAGE_SIZE;
-
-            if (p == 510 && i == required_pml2s - 2) {
-                debug_print("Here\n");
-                paging_print_tables((uintptr_t)kernel_pml4 - KERNEL_VIRTUAL_ADDRESS, WINDOW_VIRTUAL_ADDRESS + offset_in_window);
-            }
         }
 
         pml2_address += PAGE_SIZE;
     }
+
+    // Try clearing the TLB again to invalidate the entire physical memory map cache
+    asm volatile ("mov %0, %%cr3" :: "r"(((uintptr_t)&kernel_pml4[0]) - KERNEL_VIRTUAL_ADDRESS) : );
 
     // Pass on the table to the virtual memory manager, so kernel memory can be mapped at runtime
     address_space kernel_address_space;
@@ -221,6 +218,7 @@ ir_status_t arch_mmu_map(address_space *addr_space, v_addr_t address, size_t cou
     uint64_t page_flags = PAGE_PRESENT;
     if (flags & V_ADDR_REGION_WRITABLE) page_flags |= PAGE_WRITABLE;
     if (~flags & V_ADDR_REGION_EXECUTABLE) page_flags |= PAGE_NO_EXECUTE;
+    if (flags & V_ADDR_REGION_DISABLE_CACHE) page_flags |= PAGE_CACHE_DISABLE;
 
     if (arch_is_kernel_pointer((void*)address)) page_flags |= PAGE_GLOBAL;
     else page_flags |= PAGE_USER;
@@ -290,6 +288,14 @@ ir_status_t arch_mmu_protect(address_space *addr_space, v_addr_t address, size_t
     }
     if (count == 0) { return IR_OK; }
     // TODO: Check page flags using arch-defined method
+
+    uint64_t page_flags = PAGE_PRESENT;
+    if (flags & V_ADDR_REGION_WRITABLE) page_flags |= PAGE_WRITABLE;
+    if (~flags & V_ADDR_REGION_EXECUTABLE) page_flags |= PAGE_NO_EXECUTE;
+    if (flags & V_ADDR_REGION_DISABLE_CACHE) page_flags |= PAGE_CACHE_DISABLE;
+
+    if (arch_is_kernel_pointer((void*)address)) page_flags |= PAGE_GLOBAL;
+    else page_flags |= PAGE_USER;
 
     page_table_entry *table = addr_space->table_base;
 
@@ -593,5 +599,7 @@ void paging_print_tables(uintptr_t table_root, v_addr_t target) {
         debug_print("Page not mapped\n");
         return;
     }
+    debug_printf("Level 0: %#p: Address=%#p, flags=%#lx\n", table[index], table[index] & PAGE_ADDRESS_MASK, table[index] & ~PAGE_ADDRESS_MASK);
+
     debug_printf("Physical address = %#p\n", table[index] & PAGE_ADDRESS_MASK);
 }

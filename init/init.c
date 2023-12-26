@@ -169,7 +169,7 @@ void outportb(ir_handle_t ports, int offset, unsigned char value) {
 }
 
 long inportb(ir_handle_t ports, int offset) {
-    long value;
+    long value = 0;
     ir_status_t status = syscall_4(SYSCALL_IOPORT_RECEIVE, ports, offset, SIZE_BYTE, (long)&value);
     if (status)
         syscall_3(SYSCALL_SERIAL_OUT, (long)"Error %d reading port offset %d\n", status, offset);
@@ -189,7 +189,7 @@ char keyboard_read() {
     return 'e'; // Error character
 }
 
-char keyboard_write(char value) {
+char keyboard_write(unsigned char value) {
     int attempts = 1000;
 
     while(attempts--) {

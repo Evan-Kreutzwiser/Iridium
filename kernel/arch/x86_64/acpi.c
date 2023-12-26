@@ -87,28 +87,26 @@ static void record_acpi_table_address(const struct acpi_header* table) {
     }
 }
 
+extern page_table_entry kernel_pml4[512];
+
 static void find_acpi_tables() {
     // Search the first MB of ram for the RSDP
-    // Some computers have memory holes in this area and crash when trying to read from them,
-    // so only scan in areas covered by provided memory regions (whether available or not).
-    // Discovered while testing in virtualbox and a triple fault occured accessing a very
-    // small hole around 0xa0000.
-    extern struct physical_region *regions_array;
-    extern size_t regions_count;
-    for (uint r = 0; r < regions_count; r++) {
-        if (regions_array[r].base < 0x100000 && regions_array[r].type == REGION_TYPE_AVAILABLE) {
-            volatile char *physical_memory = (volatile char *)(physical_map_base + regions_array[r].base);
-            for (uint i = 0; i < regions_array[r].length; i += 16) {
-                if (strncmp((const char*)&physical_memory, ACPI_RSDP_SIGNATURE, 8) == 0) {
-                    rsdp = (void *)(physical_memory);
-                    break;
-                }
-                *physical_memory += 16;
-            }
+    paging_print_tables((uintptr_t)kernel_pml4 - KERNEL_VIRTUAL_ADDRESS, (uintptr_t)kernel_pml4);
+    paging_print_tables((uintptr_t)kernel_pml4 - KERNEL_VIRTUAL_ADDRESS, physical_map_base + 0xa0000);
+    volatile char *physical_memory = (volatile char *)(physical_map_base);
+    for (uint i = 0; i < 0x100000; i += 16) {
+        // Virtualbox has a problem that prevents me from accessing the area beginning at 0xa0000
+        // And its a standard framebuffer location so I don't expect to find it there anyway
+        if ((i < 0xa0000 || i >= 0xe0000) && strncmp((const char*)physical_memory, ACPI_RSDP_SIGNATURE, 8) == 0) {
+            rsdp = (void *)(physical_memory);
+            break;
         }
-
-        if (rsdp) {break;}
+        physical_memory += 16;
     }
+    //    }
+
+    //    if (rsdp) {break;}
+    //}
 
     if (!rsdp) {
         debug_printf("WARNGING: Failed to find rsdp!\n");
@@ -282,11 +280,18 @@ void acpi_init() {
     find_acpi_tables();
 
     debug_printf("Creating mmio vmo @ %#p\n", (uint64_t)madt->local_apic_address);
-    vm_object_create_physical(madt->local_apic_address, PAGE_SIZE, VM_MMIO_FLAGS, &local_apic_mmio_vm_object);
-    ir_status_t status = v_addr_region_map_vm_object(kernel_region, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE, local_apic_mmio_vm_object, NULL, 0, &local_apic_mmio_base);
+    ir_status_t status = vm_object_create_physical(madt->local_apic_address, PAGE_SIZE, VM_MMIO_FLAGS, &local_apic_mmio_vm_object);
+    if (status != IR_OK) {
+        debug_printf("lapic mmio reserving failed with code %d\n", status);
+        arch_pause();
+    }
+    status = v_addr_region_map_vm_object(kernel_region, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE | V_ADDR_REGION_DISABLE_CACHE, local_apic_mmio_vm_object, NULL, 0, &local_apic_mmio_base);
     if (status != IR_OK) {
         debug_printf("lapic mmio mapping failed with code %d\n", status);
+        arch_pause();
     }
+
+    debug_printf("mmio mapped to %#p\n", local_apic_mmio_base);
 
     // Count the number of processor local APIC's, which will
     // equal the number of cpu cores in the system
@@ -306,7 +311,6 @@ void acpi_init() {
 
     cpu_count = count;
     debug_printf("Computer has %d CPUs\n", count);
-    //processor_local_data = calloc(count, sizeof(struct per_cpu_data));
 
     // Get this core's apic id from the mmio registers
     uint8_t bsp_apic_id = *((uint32_t*)(local_apic_mmio_base + 0x20));

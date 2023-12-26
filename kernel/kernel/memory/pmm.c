@@ -425,9 +425,11 @@ ir_status_t pmm_allocate_range(p_addr_t address, size_t length, physical_page_in
 
     // If the code reaches here then the requested range is outside of all regions
     // So return out of memory
-    debug_printf("Physical range requested at %#p, but does not exist in a range.\n", address);
+    debug_printf("Physical range requested at %#p does not exist in available ranges. Allocating page info elsewhere.\n", address);
 
     physical_page_info *page_array = calloc(page_count, sizeof(physical_page_info));
+    if (!page_array) { return IR_ERROR_NO_MEMORY; }
+
     page_array[0].address = address;
     page_array[0].state = PAGE_STATE_USED_OUTSIDE_REGION;
     physical_page_info *previous = &page_array[0];
