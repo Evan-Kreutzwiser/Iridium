@@ -351,7 +351,7 @@ ir_status_t paging_protect_page(page_table_entry *table, v_addr_t virtual_addres
     p_addr_t physical_address = table[index] & PAGE_ADDRESS_MASK;
     table[index] = physical_address | leaf_page_flags(new_flags);
 
-    asm volatile ("invlpg (%0)" : : "r" (&virtual_address) : "memory");
+    asm volatile ("invlpg (%0)" : : "r" (virtual_address) : "memory");
 
     return IR_OK;
 }
@@ -370,11 +370,11 @@ ir_status_t paging_map_page(page_table_entry *table, v_addr_t virtual_address, p
                 page_table_entry *lower_table = (page_table_entry*)(table[index] & PAGE_ADDRESS_MASK);
                 pmm_free_page(pmm_page_from_p_addr((p_addr_t)lower_table));
                 // TODO: Do i need to invlpg the whole 2MB?
-                asm volatile ("invlpg (%0)" : : "r" (&virtual_address) : "memory");
+                asm volatile ("invlpg (%0)" : : "r" (virtual_address) : "memory");
             }
 
             table[index] = physical_address | leaf_page_flags(protection_flags) | PAGE_LARGE_PAGE;
-            asm volatile ("invlpg (%0)" : : "r" (&virtual_address) : "memory");
+            asm volatile ("invlpg (%0)" : : "r" (virtual_address) : "memory");
             return IR_OK;
         }
 
@@ -402,7 +402,7 @@ ir_status_t paging_map_page(page_table_entry *table, v_addr_t virtual_address, p
     uint index = ADDRESS_PML1_INDEX(virtual_address);
     table[index] = physical_address | leaf_page_flags(protection_flags);
 
-    asm volatile ("invlpg (%0)" : : "r" (&virtual_address) : "memory");
+    asm volatile ("invlpg (%0)" : : "r" (virtual_address) : "memory");
     return IR_OK;
 }
 
@@ -455,7 +455,8 @@ ir_status_t paging_unmap_page(page_table_entry *table, v_addr_t virtual_address)
         else { break; }
     }
 
-    asm volatile ("invlpg (%0)" : : "r" (&virtual_address) : "memory");
+    // Previously used &virtual_address, accidentally invalidating cache for the stack instead of target memory
+    asm volatile ("invlpg (%0)" : : "r" (virtual_address) : "memory");
 
     return IR_OK;
 }
@@ -571,7 +572,7 @@ static bool maybe_release_frame(page_table_entry *page_frame) {
     return true; // The caller should remove pointers to the frame
 }
 
-void paging_print_tables(uintptr_t table_root, v_addr_t target) {
+void paging_print_tables(p_addr_t table_root, v_addr_t target) {
 
     page_table_entry *table = (page_table_entry*)p_addr_to_physical_map(table_root);
     debug_printf("Page table dump for %#p:\n", target);

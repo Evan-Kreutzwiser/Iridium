@@ -102,10 +102,6 @@ void kernel_main(v_addr_t initrd_start_address) {
         memset((void*)address, 0, program_header->p_memsz);
         memcpy((void*)address, (void*)(initrd_start_address + program_header->p_offset), program_header->p_filesz);
 
-        if (*(long*)address != *(long*)(initrd_start_address + program_header->p_offset)) {
-            debug_printf("At start of section, %#p != %#p", *(long*)address, *(long*)(initrd_start_address + program_header->p_offset));
-        }
-
         v_addr_region_destroy(kernel_mapping);
     }
 
@@ -132,7 +128,7 @@ void kernel_main(v_addr_t initrd_start_address) {
 
     debug_printf("Kernel stack: %#p\n", stack_kernel_address);
 
-    debug_printf("Entering init process: Jmp to %#p\n", header->e_entry);
+    debug_printf("Entering init process: Jmp to %#p with stack %#p\n", header->e_entry, stack_address + (PAGE_SIZE * 256) -16);
     this_cpu->current_thread = thread;
     arch_enter_context(&thread->context);
 }

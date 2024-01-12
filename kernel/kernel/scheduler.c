@@ -47,9 +47,6 @@ ir_status_t sys_yield() {
 }
 
 void switch_task(bool reschedule) {
-
-    debug_print("Switching tasks\n");
-
     //arch_enter_critical();
 
     // Before switching tasks, see if there are any threads listening for signals whose deadlines have passed

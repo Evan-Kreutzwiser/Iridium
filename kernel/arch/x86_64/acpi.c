@@ -216,8 +216,6 @@ uint64_t timer_ticks = 0; // 100 = 1 second
 void timer_fired(struct registers* context) {
     timer_ticks++;
 
-    debug_printf("Stack entering switch: %#p\n", context->rsp);
-
     if (timer_ticks % 4 == 0) {
         //arch_enter_critical();
         // When the task resumes, return from this function
