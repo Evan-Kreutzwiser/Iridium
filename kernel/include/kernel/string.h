@@ -1,6 +1,7 @@
 
 #define __need_size_t
 #include <stddef.h>
+#include <stdarg.h>
 
 /// @brief Get the length of a null terminated string
 /// @param str A null terminated string
@@ -15,3 +16,7 @@ void *memset(void *ptr, int value, size_t n);
 /// Compare blocks of memory
 /// @return 0 when the blocks of memory are the same
 int memcmp(const void *str1, const void *str2, size_t n);
+
+
+void sprintf(char *dest, const char * restrict format, ...);
+void vsprintf(char *dest, const char * restrict format, va_list args);
