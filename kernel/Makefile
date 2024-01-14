@@ -23,8 +23,10 @@ ARCH_DEPS := $(patsubst %.c, %.d, $(patsubst %.S, %.d, $(ARCH_SRCS)))
 TARGET := kernel.sys
 
 SRCS     := $(shell find . -type f -name '*.c' -not -path '*/arch/*')
-OBJS     := $(patsubst %.c, %.o, $(SRCS))
+OBJS     := $(patsubst %.c, %.o, $(SRCS)) font.o
 DEPS     := $(patsubst %.c, %.d, $(SRCS))
+
+FONT := ../public/fonts/Tamsyn8x16r.psf
 
 .PHONY: clean test
 
@@ -38,6 +40,9 @@ $(TARGET): $(OBJS) $(ARCH_OBJS)
 
 %.o: %.S %.d Makefile
 	$(CC) $(CFLAGS) -MMD -MP $(INCS) $(WARNINGS) -c $< -o $@
+
+font.o: $(FONT)
+	$(LD) -r -b binary -o $@ $<
 
 $(DEPS) $(ARCH_DEPS):
 
