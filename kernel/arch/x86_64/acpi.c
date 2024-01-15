@@ -90,33 +90,6 @@ static void record_acpi_table_address(const struct acpi_header* table) {
 extern page_table_entry kernel_pml4[512];
 
 static void find_acpi_tables() {
-    // Search the first MB of ram for the RSDP
-    paging_print_tables((uintptr_t)kernel_pml4 - KERNEL_VIRTUAL_ADDRESS, (uintptr_t)kernel_pml4);
-    paging_print_tables((uintptr_t)kernel_pml4 - KERNEL_VIRTUAL_ADDRESS, physical_map_base + 0xa0000);
-    volatile char *physical_memory = (volatile char *)(physical_map_base);
-    for (uint i = 0; i < 0x100000; i += 16) {
-        // Virtualbox has a problem that prevents me from accessing the area beginning at 0xa0000
-        // And its a standard framebuffer location so I don't expect to find it there anyway
-        if ((i < 0xa0000 || i >= 0xe0000) && strncmp((const char*)physical_memory, ACPI_RSDP_SIGNATURE, 8) == 0) {
-            rsdp = (void *)(physical_memory);
-            break;
-        }
-        physical_memory += 16;
-    }
-    //    }
-
-    //    if (rsdp) {break;}
-    //}
-
-    if (!rsdp) {
-        debug_printf("WARNGING: Failed to find rsdp!\n");
-        asm volatile ("ud2");
-        return;
-    }
-
-    debug_printf("Found RSDP @ %#p\n", rsdp);
-
-
     if (rsdp->revision < 2) {
         // Use RSDT for 32 bit addresses
         struct rsdt *rsdt = (struct rsdt*)(rsdp->rsdt_address + physical_map_base);
@@ -273,8 +246,9 @@ void io_apic_interrupt_redirection(int interrupt, int gsi) {
     io_apic_write(info->address, io_offset, gsi);
 }
 
-void acpi_init() {
+void acpi_init(v_addr_t rsdp_addr) {
 
+    rsdp = (struct acpi_rsdp_v2*)rsdp_addr;
     find_acpi_tables();
 
     debug_printf("Creating mmio vmo @ %#p\n", (uint64_t)madt->local_apic_address);

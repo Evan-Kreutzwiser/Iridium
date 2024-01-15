@@ -3,6 +3,7 @@
 
 #include "arch/debug.h"
 
+#include "types.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -110,7 +111,7 @@ void apic_send_eoi();
 struct registers;
 void timer_fired(struct registers* context);
 
-void acpi_init();
+void acpi_init(v_addr_t rsdp_addr);
 int get_cpu_count();
 void smp_init();
 
