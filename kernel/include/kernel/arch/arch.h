@@ -69,4 +69,10 @@ void arch_save_context(struct registers *context);
 /// @brief Task switching utility that unwinds a level of the stack before returning
 void arch_leave_function(void);
 
+/// @brief Print cpu register contents during a kernel panic
+void arch_print_context_dump(struct registers *context);
+
+/// @brief Print a stack trace during a kernel panic
+void arch_print_stack_trace(struct registers *context);
+
 #endif // ! KERNEL_ARCH_H_

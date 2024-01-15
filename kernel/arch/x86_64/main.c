@@ -284,3 +284,35 @@ void arch_initialize_thread_context(struct registers *context, bool is_kernel) {
     context->ss = is_kernel ? 0x10 : 0x1b;
     context->rflags = 0x202; // Reserved bit (1) and interrupts enabled
 }
+
+struct stack_frame {
+    struct stack_frame *rbp;
+    uintptr_t rip;
+};
+
+void arch_print_stack_trace(struct registers *context) {
+
+    if (context->rip == 0 || context->rbp == 0) {
+        framebuffer_printf("Stack trace impossible\n");
+        return;
+    }
+
+    struct stack_frame *frame = (struct stack_frame*)context->rbp;
+
+    framebuffer_printf("%#.16p", context->rip);
+    while ((unsigned long)frame > 0xFFFF800000000000ul)
+    {
+        framebuffer_printf(" %#.16p", frame->rip);
+        frame = frame->rbp;
+    }
+    framebuffer_print("\n");
+}
+
+void arch_print_context_dump(struct registers *context) {
+    framebuffer_printf("rip=%#.16p rsp=%#.16p rbp=%#.16p\n\n", context->rip, context->rsp, context->rbp);
+    framebuffer_printf("rax=%#.16p rbx=%#.16p rcx=%#.16p rdx=%#.16p\n", context->rax, context->rbx, context->rcx, context->rdx);
+    framebuffer_printf("rdi=%#.16p rsi=%#.16p  r8=%#.16p  r9=%#.16p\n", context->rdi, context->rsi, context->r8, context->r9);
+    framebuffer_printf("r10=%#.16p r11=%#.16p r12=%#.16p r13=%#.16p\n", context->r10, context->r11, context->r12, context->r13);
+    framebuffer_printf("r14=%#.16p r15=%#.16p rflags=%#.16p\n", context->r14, context->r15, context->rflags);
+    framebuffer_printf("CS=%#p SS=%#p\n", context->cs, context->ss);
+}

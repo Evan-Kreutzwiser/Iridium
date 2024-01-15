@@ -8,6 +8,7 @@
 #include "kernel/process.h"
 #include "kernel/memory/physical_map.h"
 #include "kernel/memory/vmem.h"
+#include "kernel/main.h"
 #include "kernel/string.h"
 #include <stdbool.h>
 
@@ -76,7 +77,13 @@ void exception(registers *context, char *name) {
     dump_context(context);
     print_stack_trace(context->rbp, context->rip);
 
-    asm volatile ("1: hlt; jmp 1b;");
+    char buffer[150];
+    sprintf(buffer, "CPU exception encountered\n\n"
+            "%s at %#p, error code is %#x, if applicable.\n",
+            name, context->rip, context->error_code
+        );
+
+    panic(context, 0xe, buffer);
 }
 
 void double_fault(registers *context) {
@@ -88,24 +95,40 @@ void double_fault(registers *context) {
     dump_context(context);
     print_stack_trace(context->rbp, context->rip);
 
-    asm volatile ("1: hlt; jmp 1b;");
+    char buffer[200];
+    sprintf(buffer, "Double Fault\n\n"
+            "Encountered a critical error at %#p.\n\n"
+            "Seeing this message means that another error failed to be handled correctly\n",
+            context->rip
+        );
+
+    panic(context, 8, buffer);
 }
 
 void general_protection_fault(registers *context) {
     debug_print("\n----------------\nGeneral Protection Fault!\n");
-    debug_printf("Encounted a segmentation-related error at %#p.\n", context->rip);
-    if (context->cs == 0x20 ) {
-        debug_print("The problem occured in user mode, so it may be the result of a program executing a privileged instruction.\n");
-    } else {
-        debug_print("Potential causes include referencing the null segment, writing to reserved control register bits,\naccessing a non-cannonical address, or other segment errors.\n");
-        debug_printf("The segment selector, if applicable, is %#x.\n", context->error_code);
+    debug_printf("Encountered a segmentation-related error at %#p.\n", context->rip);
+
+    char * cause = "Potential causes include referencing the null segment, writing to reserved control register bits,\naccessing a non-cannonical address, or other segment errors.\n";
+    if (context->cs == 0x23 ) {
+        cause = "The problem occured in user mode, so it may be the result of a program executing a privileged instruction or accessing a non-cannonical address.\n";
     }
+    debug_print(cause);
+    debug_printf("The segment selector, if applicable, is %#x.\n", context->error_code);
     debug_print("----------------\n");
 
     dump_context(context);
     print_stack_trace(context->rbp, context->rip);
 
-    asm volatile ("1: hlt; jmp 1b;");
+    char buffer[400];
+    sprintf(buffer, "General Protection Fault\n\n"
+            "Encountered a segmentation-related error at %#p.\n\n"
+            "%s\n"
+            "The segment selector, if applicable, is %#x.\n",
+            context->rip, cause, context->error_code
+        );
+
+    panic(context, 0xd, buffer);
 }
 
 static bool is_in_page_fault = false;
@@ -135,8 +158,10 @@ void page_fault(registers *context) {
     debug_print("\n----------------\nPage Fault!\n");
     debug_printf("A paging related error was encountered at %#p, with error code %#x.\n", context->rip, (uint64_t)context->error_code);
     debug_printf("%s-space tried to %s %#p in %s.\n", ring, access_string, accessed_address, page);
+    int thread_id = -1;
     if (this_cpu->current_thread != NULL) {
-        debug_printf("Occurred in thread %d\n", this_cpu->current_thread->thread_id);
+        thread_id = this_cpu->current_thread->thread_id;
+        debug_printf("Occurred in thread %d\n", thread_id);
     }
     debug_print("----------------\n");
 
@@ -152,7 +177,16 @@ void page_fault(registers *context) {
         paging_print_tables(cr3, accessed_address);
     }
 
-    asm volatile ("1: hlt; jmp 1b;");
+    char buffer[300];
+    sprintf(buffer, "Page fault\n\n"
+            "A paging related error was encountered at %#p in thread %d, with error code %#x.\n"
+            "%s-space tried to %s %#p in %s.\n",
+            context->rip, thread_id, (uint64_t)context->error_code,
+            ring, access_string, accessed_address, page
+        );
+
+
+    panic(context, 0xe, buffer);
 }
 
 void interrupt_handler(registers context) {

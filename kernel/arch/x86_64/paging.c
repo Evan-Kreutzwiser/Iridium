@@ -309,6 +309,10 @@ ir_status_t arch_mmu_protect(address_space *addr_space, v_addr_t address, size_t
 
 // Remove a range of mappings from an address space
 ir_status_t arch_mmu_unmap(address_space *addr_space, v_addr_t address, size_t count) {
+    if (!addr_space) {
+        debug_printf("Null address space\n");
+        return IR_ERROR_INVALID_ARGUMENTS;
+    }
 
     int pages = count / PAGE_SIZE;
 
@@ -449,7 +453,7 @@ ir_status_t paging_unmap_page(page_table_entry *table, v_addr_t virtual_address)
         if (maybe_release_frame(table)) {
             levels[i+1][INDEX_AT_LEVEL(virtual_address, i+1)] = 0;
             // Release the page backing the table
-            pmm_free_page(pmm_page_from_p_addr((p_addr_t)table));
+            pmm_free_page(pmm_page_from_p_addr(physical_map_to_p_addr(table)));
         }
         // If we can't free this level we certainly can't free the next one
         else { break; }
@@ -457,6 +461,8 @@ ir_status_t paging_unmap_page(page_table_entry *table, v_addr_t virtual_address)
 
     // Previously used &virtual_address, accidentally invalidating cache for the stack instead of target memory
     asm volatile ("invlpg (%0)" : : "r" (virtual_address) : "memory");
+
+    debug_printf("Unmapped page for %#p\n", virtual_address);
 
     return IR_OK;
 }
@@ -579,7 +585,7 @@ void paging_print_tables(p_addr_t table_root, v_addr_t target) {
 
     for (int i = 3; i > 0; i--) {
         int index = INDEX_AT_LEVEL(target, i);
-        debug_printf("Level %d: %#p: Address=%#p, flags=%#lx\n", i, table[index], table[index] & PAGE_ADDRESS_MASK, table[index] & ~PAGE_ADDRESS_MASK);
+        debug_printf("Level %d [%d]: %#p -- Level %d Address = %#p, flags = %#lx\n", i+1, index, table[index], i, table[index] & PAGE_ADDRESS_MASK, table[index] & ~PAGE_ADDRESS_MASK);
 
         if (!IS_PRESENT(table[index])) {
             debug_print("Page not mapped\n");
@@ -596,11 +602,12 @@ void paging_print_tables(p_addr_t table_root, v_addr_t target) {
 
     int index = ADDRESS_PML1_INDEX(target);
 
+    debug_printf("Level 1 [%d]: %#p -- Address = %#p, flags=%#lx\n", index, table[index], table[index] & PAGE_ADDRESS_MASK, table[index] & ~PAGE_ADDRESS_MASK);
+
     if (!IS_PRESENT(table[index])) {
         debug_print("Page not mapped\n");
         return;
     }
-    debug_printf("Level 0: %#p: Address=%#p, flags=%#lx\n", table[index], table[index] & PAGE_ADDRESS_MASK, table[index] & ~PAGE_ADDRESS_MASK);
 
     debug_printf("Physical address = %#p\n", table[index] & PAGE_ADDRESS_MASK);
 }

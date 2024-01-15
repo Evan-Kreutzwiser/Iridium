@@ -5,8 +5,9 @@
 #include "kernel/memory/vm_object.h"
 #include "kernel/memory/physical_map.h"
 #include "kernel/object.h"
-#include "kernel/process.h"
 #include "kernel/handle.h"
+#include "kernel/process.h"
+#include "kernel/string.h"
 #include "kernel/arch/arch.h"
 #include "iridium/types.h"
 #include "types.h"
@@ -125,10 +126,7 @@ void framebuffer_print(const char* string) {
             int start_x = cursor_x * 8;
             int start_y = cursor_y * 16;
             // Every row of the glyph is a byte, and each bit in the byte represents a pixel
-
-            debug_printf("\n%c ", *string);
             for (int y = 0; y < 16; y++) {
-                debug_printf("%#x ", glyph[y]);
                 for (int x = 0; x < 8; x++) {
                     if ((glyph[y] >> (7-x)) & 1) {
                         // Draw a white pixel in the framebuffer
@@ -148,6 +146,17 @@ void framebuffer_print(const char* string) {
 
         string++;
     }
+}
+
+char buffer[2048];
+
+void framebuffer_printf(const char * restrict format, ...) {
+    va_list args;
+    va_start(args, format);
+    vsprintf(buffer, format, args);
+    va_end(args);
+
+    framebuffer_print(buffer);
 }
 
 void framebuffer_set_cursor_pos(int x, int y) {

@@ -10,6 +10,9 @@ void framebuffer_fill_screen(unsigned char r, unsigned char g, unsigned char b);
 
 void framebuffer_print(const char *string);
 
+// Use a global buffer to print to the framebuffer (Not thread safe)
+void framebuffer_printf(const char * restrict format, ...);
+
 void framebuffer_set_cursor_pos(int x, int y);
 
 /// @brief SYSCALL_DEBUG_GET_FRAMEBUFFER

@@ -7,6 +7,7 @@
 #include "kernel/heap.h"
 #include "kernel/process.h"
 #include "kernel/string.h"
+#include "kernel/devices/framebuffer.h"
 #include "kernel/memory/init.h"
 #include "kernel/memory/v_addr_region.h"
 #include "kernel/memory/physical_map.h"
@@ -105,20 +106,20 @@ void kernel_main(v_addr_t initrd_start_address) {
         v_addr_region_destroy(kernel_mapping);
     }
 
-    // Create a stack for the process, and provide it with a blank argc and argv
+    // Create a stack for the init process
     vm_object *stack_vm;
     struct v_addr_region *stack;
     v_addr_t stack_address;
-    vm_object_create(PAGE_SIZE * 256, VM_WRITABLE | VM_READABLE, &stack_vm); // 1 MB stack
-    v_addr_region_map_vm_object(address_space, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE,
+
+    ir_status_t status = vm_object_create(PAGE_SIZE * 256, VM_WRITABLE | VM_READABLE, &stack_vm); // 1 MB stack
+    if (status != IR_OK) { debug_printf("Error %d creating user stack\n", status); }
+
+    status = v_addr_region_map_vm_object(address_space, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE,
         stack_vm, &stack, 0, &stack_address);
-    struct v_addr_region *kernel_mapping;
-    v_addr_t stack_kernel_address;
-    v_addr_region_map_vm_object(kernel_region, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE, stack_vm, &kernel_mapping, 0, &stack_kernel_address);
-    v_addr_region_destroy(kernel_mapping);
+    if (status != IR_OK) { debug_printf("Error %d mapping user stack\n", status); }
 
     struct thread *thread;
-    ir_status_t status = thread_create(init_process, &thread);
+    status = thread_create(init_process, &thread);
     if (status) {
         debug_printf("Error %d creating init thread\n", status);
     }
@@ -126,9 +127,24 @@ void kernel_main(v_addr_t initrd_start_address) {
     arch_set_stack_pointer(&thread->context, stack_address + (PAGE_SIZE * 256) -16);
     arch_mmu_set_address_space(&init_process->address_space);
 
-    debug_printf("Kernel stack: %#p\n", stack_kernel_address);
-
     debug_printf("Entering init process: Jmp to %#p with stack %#p\n", header->e_entry, stack_address + (PAGE_SIZE * 256) -16);
     this_cpu->current_thread = thread;
     arch_enter_context(&thread->context);
+}
+
+void panic(struct registers *context, int error_code, char *message) {
+    framebuffer_fill_screen(0x04, 0xb2, 0xd1);
+
+    framebuffer_printf("KERNEL PANIC!\nError code %d:\n\n", error_code);
+    framebuffer_printf("Iridium has encountered an unrecoverable error\n\n");
+    framebuffer_print(message);
+
+    framebuffer_print("\nRegister content:\n");
+    arch_print_context_dump(context);
+    framebuffer_print("\nCall stack:\n");
+    arch_print_stack_trace(context);
+
+    // Halt the cpu
+    arch_enter_critical();
+    arch_pause();
 }
