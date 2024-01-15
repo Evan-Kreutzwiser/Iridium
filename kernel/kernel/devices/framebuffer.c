@@ -108,6 +108,10 @@ void framebuffer_fill_screen(unsigned char r, unsigned char g, unsigned char b) 
 }
 
 void framebuffer_print(const char* string) {
+    if (!framebuffer) {
+        return;
+    }
+
     const struct psf_font_header *font = (struct psf_font_header*)&FONT_START;
     uint32_t* buffer = (uint32_t*)framebuffer;
 
@@ -151,6 +155,10 @@ void framebuffer_print(const char* string) {
 char buffer[2048];
 
 void framebuffer_printf(const char * restrict format, ...) {
+    if (!framebuffer) {
+        return;
+    }
+
     va_list args;
     va_start(args, format);
     vsprintf(buffer, format, args);
