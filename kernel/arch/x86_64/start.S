@@ -38,7 +38,7 @@ multiboot2_header:
     // Framebuffer tag
     .align 8
     .word MULTIBOOT_HEADER_TAG_FRAMEBUFFER
-    .word 1 // Optional
+    .word 0
     .long 20 // Tag is 20 bytes large
     .long 0 // No prefered resolution (width)
     .long 0 //                        (height)

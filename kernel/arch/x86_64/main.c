@@ -208,7 +208,7 @@ void arch_main(p_addr_t multiboot_physical_addr) {
 
     if (!found_init_module) {
         debug_print("Init ramdisk not provided. Cannot boot.\n");
-        arch_pause();
+        panic(NULL, -1, "Init ramdisk not provided. Cannot boot.\n");
     }
 
     size_t init_module_length = init_module_end - init_module_start;
@@ -228,6 +228,10 @@ void arch_main(p_addr_t multiboot_physical_addr) {
                          framebuffer_pitch, framebuffer_bpp);
     } else {
         debug_printf("No framebuffer provided\n");
+    }
+
+    if (!found_rsdp) {
+        panic(NULL, -1, "RSDP not found. Cannot boot.\n");
     }
 
     // Read acpi tables for hardware information

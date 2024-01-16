@@ -5,6 +5,7 @@
 #include <arch/x86_64/msr.h>
 #include <arch/x86_64/pit.h>
 #include <arch/registers.h>
+#include <kernel/main.h>
 #include <kernel/string.h>
 #include <kernel/memory/physical_map.h>
 #include <kernel/memory/v_addr_region.h>
@@ -255,12 +256,12 @@ void acpi_init(v_addr_t rsdp_addr) {
     ir_status_t status = vm_object_create_physical(madt->local_apic_address, PAGE_SIZE, VM_MMIO_FLAGS, &local_apic_mmio_vm_object);
     if (status != IR_OK) {
         debug_printf("lapic mmio reserving failed with code %d\n", status);
-        arch_pause();
+        panic(NULL, -1, "Local apic MMIO reserving failed.");
     }
     status = v_addr_region_map_vm_object(kernel_region, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE | V_ADDR_REGION_DISABLE_CACHE, local_apic_mmio_vm_object, NULL, 0, &local_apic_mmio_base);
     if (status != IR_OK) {
         debug_printf("lapic mmio mapping failed with code %d\n", status);
-        arch_pause();
+        panic(NULL, -1, "Local apic MMIO mapping failed.");
     }
 
     debug_printf("mmio mapped to %#p\n", local_apic_mmio_base);
@@ -283,6 +284,8 @@ void acpi_init(v_addr_t rsdp_addr) {
 
     cpu_count = count;
     debug_printf("Computer has %d CPUs\n", count);
+
+    paging_print_tables(get_kernel_address_space()->table_base, local_apic_mmio_base);
 
     // Get this core's apic id from the mmio registers
     uint8_t bsp_apic_id = *((uint32_t*)(local_apic_mmio_base + 0x20));

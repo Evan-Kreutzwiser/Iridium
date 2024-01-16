@@ -21,6 +21,6 @@ ir_status_t paging_map_page(page_table_entry *table, v_addr_t virtual_address, p
 ir_status_t paging_protect_page(page_table_entry *table, v_addr_t virtual_address, uint64_t protection_flags);
 ir_status_t paging_unmap_page(page_table_entry *table, v_addr_t virtual_address);
 
-void paging_print_tables(p_addr_t table_root, v_addr_t target);
+void paging_print_tables(page_table_entry *table_root, v_addr_t target);
 
 #endif // ARCH_X86_64_PAGING_H_

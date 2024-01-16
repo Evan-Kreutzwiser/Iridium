@@ -5,6 +5,7 @@
 #include "arch/address_space.h"
 #include "kernel/arch/arch.h"
 #include "kernel/arch/mmu.h"
+#include "kernel/main.h"
 #include "kernel/string.h"
 #include "align.h"
 #include "kernel/memory/pmm.h"
@@ -18,11 +19,11 @@
 #include "arch/debug.h"
 
 /// 2 MB
-#define LARGE_PAGE_SIZE 0x200000
+#define LARGE_PAGE_SIZE 0x200000ul
 /// 1 GB
-#define GIGABYTE_PAGE_SIZE 0x40000000
+#define GIGABYTE_PAGE_SIZE 0x40000000ul
 /// 512 GB
-#define PML4_PAGE_SIZE 0x8000000000
+#define PML4_PAGE_SIZE 0x8000000000ul
 
 /// The bits of the page entry used for the address
 #define PAGE_ADDRESS_MASK     0x000ffffffffff000ul
@@ -142,9 +143,10 @@ void paging_init(struct physical_region *memory_regions, size_t count) {
     debug_printf("Highest physical address is %#p\n", highest_physical_address);
 
     // TOOD: Dynamic physical map size
-    if (highest_physical_address > physical_map_length) {
-        debug_print("FATAL: More than 512GB of RAM detected\n");
-        arch_pause();
+    bool too_much_ram = highest_physical_address > GIGABYTE_PAGE_SIZE * 512;
+    if (too_much_ram) {
+        debug_print("Warning: More than 512GB of RAM detected\n");
+        highest_physical_address = GIGABYTE_PAGE_SIZE * 512;
     }
 
     // TODO: Make upper bound closer to the edge than a whole GB away
@@ -578,9 +580,26 @@ static bool maybe_release_frame(page_table_entry *page_frame) {
     return true; // The caller should remove pointers to the frame
 }
 
-void paging_print_tables(p_addr_t table_root, v_addr_t target) {
+/// @brief Print out each level of the page tables leading to a specific address,
+///        finding the physical page it maps to and the access flags.
+/// @param table_root Address in the physical map of the pml4.
+///                   Where in memory it resides is determined based on the address
+///                   (physical addresses, physical map pointers, and kernel addresses all accepted)
+/// @param target Address to find the physical address of
+void paging_print_tables(page_table_entry *table_root, v_addr_t target) {
 
-    page_table_entry *table = (page_table_entry*)p_addr_to_physical_map(table_root);
+    page_table_entry *table;
+    if ((v_addr_t)table_root > KERNEL_VIRTUAL_ADDRESS) {
+        // Kernel addresses
+        table = (page_table_entry*)((uintptr_t)table_root - KERNEL_VIRTUAL_ADDRESS + physical_map_base);
+    } else if ((v_addr_t)table_root > physical_map_base) {
+        // Physical map addresses
+        table = (page_table_entry*)((uintptr_t)table_root);
+    } else {
+        // Physical addresses
+        table = table_root + physical_map_base;
+    }
+
     debug_printf("Page table dump for %#p:\n", target);
 
     for (int i = 3; i > 0; i--) {

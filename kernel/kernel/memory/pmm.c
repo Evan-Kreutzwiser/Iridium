@@ -7,6 +7,7 @@
 #include "kernel/memory/init.h"
 #include "kernel/arch/mmu.h"
 #include "kernel/heap.h"
+#include "kernel/main.h"
 #include "iridium/types.h"
 #include "iridium/errors.h"
 #include "types.h"
@@ -81,7 +82,7 @@ void physical_memory_init() {
     // from the bootloader before the physical memory manager is initalized
     if (!regions_array || regions_count == 0) {
         debug_printf("FATAL: Boot code did not initalize memory regions!\n");
-        arch_pause();
+        panic(NULL, -1, "Architecture-specific startup code did not initialize memory regions.\n");
     }
 
     // Setup each usable region's internal page data array and update memory counters
@@ -529,7 +530,7 @@ static physical_page_info *pmm_free_list_pop() {
 
     if (popped_page->next == NULL) {
         debug_printf("FATAL: Free page stack exhausted.\n");
-        arch_pause();
+        panic(NULL, -1, "Out of memory. Free page stack exhausted.\n");
     }
 
     // Move the next page to the start of the list
