@@ -254,14 +254,14 @@ void keyboard_thread() {
         value = keyboard_read();
         syscall_2(SYSCALL_SERIAL_OUT, (long)"%c", keys[value]);
 
-        for (int i = 0; i < 16; i++, position += pitch) {
-            for (int j = 0; j < 16; j++) {
+        for (int i = 0; i < 64; i++, position += pitch) {
+            for (int j = 0; j < 64; j++) {
                 framebuffer[position + (j * (bpp / 8))] = 128;
                 framebuffer[position + (j * (bpp / 8)) + 1] = 255 - i;
                 framebuffer[position + (j * (bpp / 8)) + 2] = j;
             }
         }
-        position += bpp * 16;
+        position += bpp * 64;
     }
 }
 
@@ -275,13 +275,13 @@ void thread_entry() {
     //}
 
     int position = pitch * 100 + (bpp * 32);
-    for (int i = 0; i < 16; i++, position += pitch) {
-        for (int j = 0; j < 16; j++) {
+    for (int i = 0; i < 64; i++, position += pitch) {
+        for (int j = 0; j < 64; j++) {
             //int x = wait();
 
             framebuffer[position + (j * (bpp / 8))] = 128;
-            framebuffer[position + (j * (bpp / 8)) + 1] = 255 - i * 16;
-            framebuffer[position + (j * (bpp / 8)) + 2] = j*16;
+            framebuffer[position + (j * (bpp / 8)) + 1] = 255 - i * 4;
+            framebuffer[position + (j * (bpp / 8)) + 2] = j*4;
         }
         //syscall_1(SYSCALL_YIELD, 0);
     }
@@ -290,11 +290,11 @@ void thread_entry() {
     int x = 0;
     while (1) {
         int position = pitch * 100 + (bpp * 32);
-        for (int i = 0; i < 16; i++, position += pitch) {
-            for (int j = 0; j < 16; j++) {
+        for (int i = 0; i < 64; i++, position += pitch) {
+            for (int j = 0; j < 64; j++) {
                 framebuffer[position + (j * (bpp / 8))+1] = x;
-                framebuffer[position + (j * (bpp / 8))] = i*16;
-                framebuffer[position + (j * (bpp / 8)) + 2] = 255 - j*16;
+                framebuffer[position + (j * (bpp / 8))] = i*4;
+                framebuffer[position + (j * (bpp / 8)) + 2] = 255 - j*4;
             }
         }
         x = (x + 1) % 128;
@@ -310,11 +310,11 @@ void _start(void) {
         if (status == IR_OK ) {
             syscall_2(SYSCALL_SERIAL_OUT, (long)"Framebuffer successfully mapped to %#p\n", (long)framebuffer);
             int position = 0;
-            for (int i = 0; i < 16; i++, position += pitch) {
-                for (int j = 0; j < 16; j++) {
+            for (int i = 0; i < 64; i++, position += pitch) {
+                for (int j = 0; j < 64; j++) {
                     framebuffer[position + (j * (bpp / 8))] = 128;
-                    framebuffer[position + (j * (bpp / 8)) + 1] = i*16;
-                    framebuffer[position + (j * (bpp / 8)) + 2] = 255 - j*16;
+                    framebuffer[position + (j * (bpp / 8)) + 1] = i*4;
+                    framebuffer[position + (j * (bpp / 8)) + 2] = 255 - j*4;
                 }
             }
 
@@ -324,11 +324,11 @@ void _start(void) {
 
             position = pitch * 100;
             for (int i = 0; i < 16; i++, position += pitch) {
-                for (int j = 0; j < 16; j++) {
+                for (int j = 0; j < 64; j++) {
                     //int x = wait();
                     framebuffer[position + (j * (bpp / 8))] = 200;
-                    framebuffer[position + (j * (bpp / 8)) + 1] = 255 - i*16;
-                    framebuffer[position + (j * (bpp / 8)) + 2] = 255 - j*16;
+                    framebuffer[position + (j * (bpp / 8)) + 1] = 255 - i*4;
+                    framebuffer[position + (j * (bpp / 8)) + 2] = 255 - j*4;
                 }
                 //syscall_1(SYSCALL_YIELD, 0);
             }
@@ -337,11 +337,11 @@ void _start(void) {
             int x = 0;
             while (1) {
                 position = pitch * 100;
-                for (int i = 0; i < 16; i++, position += pitch) {
-                    for (int j = 0; j < 16; j++) {
+                for (int i = 0; i < 64; i++, position += pitch) {
+                    for (int j = 0; j < 64; j++) {
                         framebuffer[position + (j * (bpp / 8))] = x;
-                        framebuffer[position + (j * (bpp / 8)) + 1] = i*16;
-                        framebuffer[position + (j * (bpp / 8)) + 2] = 255 - j*16;
+                        framebuffer[position + (j * (bpp / 8)) + 1] = i*4;
+                        framebuffer[position + (j * (bpp / 8)) + 2] = 255 - j*4;
                     }
                 }
                 x = (x + 1) % 128;
