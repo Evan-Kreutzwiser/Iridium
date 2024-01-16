@@ -29,8 +29,8 @@ struct psf_font_header {
     uint32_t width;
 };
 
-extern void FONT_START;
-extern void FONT_END;
+extern char FONT_START;
+extern char FONT_END;
 
 vm_object *framebuffer_vm_object;
 v_addr_t framebuffer;
@@ -94,22 +94,39 @@ void framebuffer_fill_screen(unsigned char r, unsigned char g, unsigned char b) 
         return;
     }
 
-    // TODO: Only works on little-endian CPUs
-    uint32_t color = r << 16 | g << 8 | b;
+    if (fb_bits_per_pixel == 32) {
+        // TODO: Only works on little-endian CPUs
+        uint32_t color = r << 16 | g << 8 | b;
 
-    uint32_t* buffer = (uint32_t*)framebuffer;
-    for (int y = 0; y < fb_height; y++) {
-        for (int x = 0; x < fb_width; x++) {
-            *buffer = color;
-            buffer++;
+        uint32_t* buffer = (uint32_t*)framebuffer;
+        for (int y = 0; y < fb_height; y++) {
+            for (int x = 0; x < fb_width; x++) {
+                *buffer = color;
+                buffer++;
+            }
+            buffer = (uint32_t*)(framebuffer + y * fb_pitch);
         }
-        buffer = (uint32_t*)(framebuffer + y * fb_pitch);
+    } else {
+        // Assume 24 bpp
+        char* buffer = (char*)framebuffer;
+        for (int y = 0; y < fb_height; y++) {
+            for (int x = 0; x < fb_width; x++) {
+                buffer[0] = r;
+                buffer[1] = g;
+                buffer[2] = b;
+                buffer += 3;
+            }
+            buffer = (char*)(framebuffer + y * fb_pitch);
+        }
     }
 }
 
 void framebuffer_print(const char* string) {
+    if (!framebuffer) {
+        return;
+    }
+
     const struct psf_font_header *font = (struct psf_font_header*)&FONT_START;
-    uint32_t* buffer = (uint32_t*)framebuffer;
 
     const int bytes_per_pixel = fb_bits_per_pixel / 8;
 
@@ -130,7 +147,16 @@ void framebuffer_print(const char* string) {
                 for (int x = 0; x < 8; x++) {
                     if ((glyph[y] >> (7-x)) & 1) {
                         // Draw a white pixel in the framebuffer
-                        *(uint32_t*)(framebuffer + ((y + start_y)*fb_pitch) + ((x + start_x)*bytes_per_pixel)) = 0x00ffffff;
+                        if (fb_bits_per_pixel == 32) {
+                            // Optimized single write for pixel
+                            *(uint32_t*)(framebuffer + ((y + start_y)*fb_pitch) + ((x + start_x)*bytes_per_pixel)) = 0x00ffffff;
+                        } else {
+                            // TODO: Assumes 24 bits per pixel
+                            char* pixel = (char*)(framebuffer + ((y + start_y)*fb_pitch) + ((x + start_x)*bytes_per_pixel));
+                            pixel[0] = 0xff; // R
+                            pixel[1] = 0xff; // G
+                            pixel[2] = 0xff; // B
+                        }
                     }
                 }
             }
@@ -139,7 +165,7 @@ void framebuffer_print(const char* string) {
         }
 
         // Wrapping at end of line
-        if (cursor_x > max_x) {
+        if (cursor_x >= max_x) {
             cursor_x = 0;
             cursor_y++;
         }
@@ -151,6 +177,10 @@ void framebuffer_print(const char* string) {
 char buffer[2048];
 
 void framebuffer_printf(const char * restrict format, ...) {
+    if (!framebuffer) {
+        return;
+    }
+
     va_list args;
     va_start(args, format);
     vsprintf(buffer, format, args);

@@ -100,18 +100,33 @@ int memcmp(const void *str1, const void *str2, size_t n) {
 static char hex_characters[] = "0123456789abcdef";
 static char hex_characters_capital[] = "0123456789ABCDEF";
 
-static long va_arg_from_width(va_list va, int bits) {
+static long va_arg_from_width_signed(va_list va, int bits) {
     switch (bits) {
         case 8:
             return va_arg(va, int); // Promoted to int
         case 16:
             return va_arg(va, int); // Promoted to int
         case 32:
-            return va_arg(va, uint32_t);
+            return va_arg(va, int);
         case 64:
-            return va_arg(va, uint64_t);
+            return va_arg(va, long);
         default:
-            return va_arg(va, uint32_t);
+            return va_arg(va, int);
+    }
+}
+
+static unsigned long va_arg_from_width_unsigned(va_list va, int bits) {
+    switch (bits) {
+        case 8:
+            return va_arg(va, int); // Promoted to int
+        case 16:
+            return va_arg(va, int); // Promoted to int
+        case 32:
+            return va_arg(va, unsigned int);
+        case 64:
+            return va_arg(va, unsigned long);
+        default:
+            return va_arg(va, unsigned int);
     }
 }
 
@@ -132,7 +147,7 @@ static int max(int a, int b) {
 }
 
 /// @return Number of characters printed
-static int print_decimal_signed(char *dest, int64_t value, int min_length_zeros, bool display_plus, bool space_if_positive) {
+static int print_decimal_signed(char *dest, long value, int min_length_zeros, bool display_plus, bool space_if_positive) {
     int characters_printed = 0;
 
     if (value < 0) {
@@ -362,7 +377,7 @@ void vsprintf(char *dest, const char *restrict format, va_list args) {
 
                 }
                 else if (*format == 'd' || *format == 'i') {
-                    long value = va_arg_from_width(args, bits);
+                    long value = va_arg_from_width_signed(args, bits);
 
                     int length = max(value_length(value, 10), min_precision);
                     if (flag_plus || flag_space || value < 0) { length++; } // preceding symbol counts for the width
@@ -377,7 +392,7 @@ void vsprintf(char *dest, const char *restrict format, va_list args) {
                     dest += print_decimal_signed(dest, value, min_precision, flag_plus, flag_space);
                 }
                 else if (*format == 'u') {
-                    long value = va_arg_from_width(args, bits);
+                    long value = va_arg_from_width_unsigned(args, bits);
 
                     int length = max(value_length(value, 10), min_precision);
                     if (flag_plus || flag_space) { length++; } // preceding symbol counts for the width
@@ -394,7 +409,7 @@ void vsprintf(char *dest, const char *restrict format, va_list args) {
                 // Ignores flag_zero, flag_plus, and flag_space
                 else if (*format == 'x' || *format == 'X' || *format == 'p') {
                     if (*format == 'p') { bits = sizeof(size_t) * 8; }
-                    unsigned long value = va_arg_from_width(args, bits);
+                    unsigned long value = va_arg_from_width_unsigned(args, bits);
 
                     int length = max(value_length(value, 16), min_precision);
                     if (flag_hastag) { length += 2; } // preceding symbol counts for the width

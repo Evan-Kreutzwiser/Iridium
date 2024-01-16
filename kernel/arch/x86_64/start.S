@@ -1,28 +1,62 @@
 // Entry point(s) and bootloader headers
 
-#include <multiboot/multiboot.h>
+#include <multiboot/multiboot2.h>
 #include <kernel/stack.h>
 
 #include <arch/defines.h>
 #include <arch/x86_64/msr.h>
 
-// Make multiboot bootloaders provide memory info and page align the initrd
-#define MULTIBOOT_FLAGS (MULTIBOOT_AOUT_KLUDGE | MULTIBOOT_MEMORY_INFO | MULTIBOOT_PAGE_ALIGN | MULTIBOOT_VIDEO_MODE)
-
 .section .multiboot
 .type multiboot_header, @object
-multiboot_header:
+.size multiboot_header, multiboot2_header_end - multiboot2_header
+multiboot2_header:
+    // Base header
     .align  MULTIBOOT_HEADER_ALIGN
-    .long   MULTIBOOT_HEADER_MAGIC
-    .long   MULTIBOOT_FLAGS
-    .long   -(MULTIBOOT_HEADER_MAGIC + MULTIBOOT_FLAGS)
-    // Multiboot aout kludge
-    .long   multiboot_header         // header_addr
-    .long   KERNEL_PHYSICAL_ADDRESS  // load_addr
-    .long   KERNEL_PHYSICAL_DATA_END // load_end
-    .long   _end_physical            // bss_end_addr
-    .long   multiboot_start          // entry_point
+    .long   MULTIBOOT2_HEADER_MAGIC
+    .long   0 // x86 architecture
 
+    .equ    MULTIBOOT_HEADER_LENGTH, multiboot2_header_end - multiboot2_header
+    .long   MULTIBOOT_HEADER_LENGTH
+
+    .equ    MULTIBOOT_HEADER_CHECKSUM, -(MULTIBOOT2_HEADER_MAGIC + MULTIBOOT_HEADER_LENGTH)
+    .long   MULTIBOOT_HEADER_CHECKSUM // Checksum - These 4 fields must equal 0 mod 2^32
+
+    // Tags
+    // Bit 0 of flags indicates whether bootloader support for the tag is optional
+
+    // Information request tag
+    .align 8
+    .word MULTIBOOT_HEADER_TAG_INFORMATION_REQUEST
+    .word 0 // flags
+    .long 28
+    .long MULTIBOOT_TAG_TYPE_FRAMEBUFFER
+    .long MULTIBOOT_TAG_TYPE_ACPI_OLD
+    .long MULTIBOOT_TAG_TYPE_ACPI_NEW
+    .long MULTIBOOT_TAG_TYPE_MMAP
+    .long MULTIBOOT_TAG_TYPE_MODULE
+
+    // Framebuffer tag
+    .align 8
+    .word MULTIBOOT_HEADER_TAG_FRAMEBUFFER
+    .word 0
+    .long 20 // Tag is 20 bytes large
+    .long 0 // No prefered resolution (width)
+    .long 0 //                        (height)
+    .long 32 // Prefer 32 bits per pixel
+
+    // Page-align modules
+    .align 8
+    .word MULTIBOOT_HEADER_TAG_MODULE_ALIGN
+    .word 0
+    .long 8
+
+    // Terminating tag
+    .align 8
+    .word MULTIBOOT_HEADER_TAG_END
+    .word 0
+    .long 8
+
+multiboot2_header_end:
 
 // Bootstrap page tables for entering 64 bit mode
 .section .boot
@@ -62,10 +96,10 @@ multiboot_start:
     cli
 
     // Make no assumptions about the environment
-    cld // The abi required the direction flag is clear
+    cld // The abi requires the direction flag is clear
 
     // Multiboot spec requires there to be magic value in %eax
-    cmp     $MULTIBOOT_BOOTLOADER_MAGIC,    %eax
+    cmp     $MULTIBOOT2_BOOTLOADER_MAGIC,    %eax
     jne     bad_multiboot_magic
     jmp     multiboot_trampoline_32
 

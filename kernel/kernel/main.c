@@ -59,7 +59,7 @@ void kernel_main(v_addr_t initrd_start_address) {
     if (memcmp(header->e_ident, ELFMAG, SELFMAG) != 0) {
 
         debug_printf("FATAL: Initrd.sys not an elf file");
-        arch_pause();
+        panic(NULL, -1, "initrd.sys is not a valid ELF file. Cannot boot.");
     }
 
     Elf64_Phdr *program_header = (Elf64_Phdr*)(initrd_start_address + header->e_phoff);
@@ -139,10 +139,12 @@ void panic(struct registers *context, int error_code, char *message) {
     framebuffer_printf("Iridium has encountered an unrecoverable error\n\n");
     framebuffer_print(message);
 
-    framebuffer_print("\nRegister content:\n");
-    arch_print_context_dump(context);
-    framebuffer_print("\nCall stack:\n");
-    arch_print_stack_trace(context);
+    if (context) {
+        framebuffer_print("\nRegister content:\n");
+        arch_print_context_dump(context);
+        framebuffer_print("\nCall stack:\n");
+        arch_print_stack_trace(context);
+    }
 
     // Halt the cpu
     arch_enter_critical();

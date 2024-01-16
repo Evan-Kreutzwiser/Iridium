@@ -10,7 +10,7 @@
 #include "kernel/memory/physical_map.h"
 #include "kernel/string.h"
 #include "kernel/devices/framebuffer.h"
-#include "multiboot/multiboot.h"
+#include "multiboot/multiboot2.h"
 #include "arch/defines.h"
 #include "arch/x86_64/idt.h"
 #include "arch/x86_64/gdt.h"
@@ -32,72 +32,70 @@
 #define CPUID_EXTENTED_FEATURE_LEAF 0x80000001
 #define CPUID_EXTENDED_EDX_1G (1 << 26)
 
-multiboot_info_t *multiboot_struct;
-
 // Trying to dynamically allocate this before the heap (or even the physical memory
 // manager for that matter) is prepared proved problematic. 32 *should* be enough
 // for any system, but if its not, this should be expanded.
 #define MAX_MEMORY_REGIONS 32
 struct physical_region physical_memory_regions[MAX_MEMORY_REGIONS];
 
-struct arch_reserved_range reserved_memory_regions[2];
+struct arch_reserved_range reserved_memory_regions[1];
 
 // Points to the array of memory ranges arch code wants reserved
 extern struct arch_reserved_range *reserved_ranges;
 extern size_t reserved_ranges_count;
 
+bool found_framebuffer = false;
+bool found_init_module = false;
+bool found_memory = false;
+bool found_rsdp = false;
+
+p_addr_t init_module_start;
+p_addr_t init_module_end;
+
 /// @brief Pass the computer's physical memory regions on the the physical memory manager.
 /// @note This was moved to a seperate function so that `kernel_startup` can create a
 ///       bootstrap heap that this can dynamically allocate the region list on.
 /// @see `memory_regions` for how the array is populated
-static void early_get_physical_memory_regions(struct multiboot_info *multiboot_info, struct physical_region **regions, size_t *count) {
-    struct multiboot_mmap_entry *memory_map = (void*)(uintptr_t)multiboot_info->mmap_addr;
-    size_t regions_count = multiboot_info->mmap_length / sizeof(struct multiboot_mmap_entry); // Number of mmap entries
-
-    debug_printf("%d mmap entries\n", regions_count);
-
-    if (regions_count > MAX_MEMORY_REGIONS) {
-        debug_printf("Too many memory regions (%zd)! Truncated to %d.\n", regions_count, MAX_MEMORY_REGIONS);
-    }
+static void early_get_physical_memory_regions(struct multiboot_tag_mmap *mmap, struct physical_region **regions, size_t *count) {
 
     // Copy every memory map entry into the kernel's list
-    struct multiboot_mmap_entry *entry = memory_map;
-    for (uint i = 0; i < regions_count; i++) {
+    size_t regions_count = 0;
+    struct multiboot_mmap_entry *entry;
+    for (entry = mmap->entries; ((uintptr_t)entry < (uintptr_t)mmap + mmap->size) && regions_count < MAX_MEMORY_REGIONS; entry++) {
         // Round the regions inwards to full pages, since thats the smallest granuality we can work with.
         p_addr_t old_base = entry->addr;
         p_addr_t old_end = old_base + entry->len;
-        physical_memory_regions[i].base = ROUND_UP_PAGE(old_base);
-        physical_memory_regions[i].length = ROUND_DOWN_PAGE(old_end) - ROUND_UP_PAGE(old_base);
+
+        struct physical_region *region = &physical_memory_regions[regions_count];
+        region->base = ROUND_UP_PAGE(old_base);
+        region->length = ROUND_DOWN_PAGE(old_end) - ROUND_UP_PAGE(old_base);
 
         // Translate mulitboot memory type to a generic type
         if (entry->type == MULTIBOOT_MEMORY_AVAILABLE) {
-            physical_memory_regions[i].type = REGION_TYPE_AVAILABLE;
+            region->type = REGION_TYPE_AVAILABLE;
         } else if (entry->type == MULTIBOOT_MEMORY_RESERVED) {
-            physical_memory_regions[i].type = REGION_TYPE_RESERVED;
+            region->type = REGION_TYPE_RESERVED;
         } else if (entry->type == MULTIBOOT_MEMORY_ACPI_RECLAIMABLE) {
-            physical_memory_regions[i].type = REGION_TYPE_RECLAIMABLE;
+            region->type = REGION_TYPE_RECLAIMABLE;
         } else {
-            physical_memory_regions[i].type = REGION_TYPE_UNUSABLE;
+            region->type = REGION_TYPE_UNUSABLE;
         }
 
-        debug_printf("Type %d memory region from %#lx to %#lx\n", physical_memory_regions[i].type, physical_memory_regions[i].base, physical_memory_regions[i].base+ physical_memory_regions[i].length);
+        debug_printf("Type %d memory region from %#lx to %#lx\n", region->type, region->base, region->base + region->length);
 
-        entry++;
+        regions_count++;
     }
+
+    debug_printf("%d mmap entries\n", regions_count);
 
     *regions = physical_memory_regions;
     *count = regions_count;
 }
 
-void arch_main(p_addr_t multiboot_struct_physical) {
+void arch_main(p_addr_t multiboot_physical_addr) {
 
     // Get the per-cpu data pointer ready as soon as possible, even if the contained data won't be ready for a while
     arch_set_cpu_local_pointer(&processor_local_data[0]);
-
-    extern struct physical_region *regions_array;
-    extern size_t regions_count;
-
-    early_get_physical_memory_regions((struct multiboot_info*)multiboot_struct_physical, &regions_array, &regions_count);
 
     // Set up exception handlers
     idt_init();
@@ -130,57 +128,115 @@ void arch_main(p_addr_t multiboot_struct_physical) {
         debug_print("1G pages supported\n");
     }
 
-    // Create the physical map in kernel space
-    paging_init(physical_memory_regions, regions_count);
-    // Memory is no longer identity mapped, so access the multiboot info through
-    // the physical memory map instead
-    multiboot_struct = (multiboot_info_t*)p_addr_to_physical_map(multiboot_struct_physical);
+    p_addr_t framebuffer_addr;
+    int framebuffer_width;
+    int framebuffer_height;
+    int framebuffer_pitch;
+    int framebuffer_bpp;
 
+    uintptr_t rsdp_addr;
+
+    struct multiboot_tag *tag = (void*)(multiboot_physical_addr + 8);
+    while (tag->type != MULTIBOOT_TAG_TYPE_END) {
+        debug_printf("Multiboot tag - Type %d, size %#x\n", tag->type, tag->size);
+        switch (tag->type) {
+            case MULTIBOOT_TAG_TYPE_MMAP:
+                found_memory = true;
+                extern struct physical_region *regions_array;
+                extern size_t regions_count;
+                early_get_physical_memory_regions((void*)tag, &regions_array, &regions_count);
+
+                debug_printf("%#zd memory regions present\n", regions_count);
+
+                // Create the physical map in kernel space
+                paging_init(physical_memory_regions, regions_count);
+                // Memory is no longer identity mapped, so access the multiboot info through
+                // the physical memory map instead
+                tag = (void*)p_addr_to_physical_map(tag);
+                break;
+
+            case MULTIBOOT_TAG_TYPE_FRAMEBUFFER:
+                struct multiboot_tag_framebuffer_common *framebuffer = (void*)tag;
+                if (framebuffer->framebuffer_type == MULTIBOOT_FRAMEBUFFER_TYPE_RGB) {
+                    found_framebuffer = true;
+                    framebuffer_addr = framebuffer->framebuffer_addr;
+                    framebuffer_width = framebuffer->framebuffer_width;
+                    framebuffer_height = framebuffer->framebuffer_height;
+                    framebuffer_pitch = framebuffer->framebuffer_pitch;
+                    framebuffer_bpp = framebuffer->framebuffer_bpp;
+                }
+                else {
+                    debug_printf("Framebuffer is type %hhd, not RGB!\n", framebuffer->framebuffer_type);
+                }
+                break;
+
+            case MULTIBOOT_TAG_TYPE_MODULE:
+                // Expect the init file to be the only module loaded
+                if (found_init_module) {
+                    debug_printf("WARNING: More than one module loaded. Most recent treated as initrd");
+                }
+                found_init_module = true;
+                struct multiboot_tag_module *module = (void*)tag;
+                init_module_start = module->mod_start;
+                init_module_end = module->mod_end;
+                break;
+
+            case MULTIBOOT_TAG_TYPE_ACPI_OLD:
+            case MULTIBOOT_TAG_TYPE_ACPI_NEW:
+                // Prefer new ACPI tags
+                if (!found_rsdp || tag->type == MULTIBOOT_TAG_TYPE_ACPI_NEW){
+                    found_rsdp = true;
+                    rsdp_addr = (uintptr_t)&tag[1];
+                    // Tag order is not guarenteed so the address may or may not be in the physical map already
+                    if (rsdp_addr < physical_map_base) rsdp_addr += physical_map_base;
+
+                    debug_printf("Multiboot provided rsdp pointer: %#p\n", rsdp_addr);
+                }
+                break;
+        }
+
+        tag = (void*)ROUND_UP((uintptr_t)tag + tag->size, 8);
+    }
+
+    if (!found_memory) {
+        debug_print("Memory map not provided, cannot boot.\n");
+        arch_pause();
+    }
 
     // Find regions we want protected and tell the pmm to save them for us while it initalizes
     // such as the initrd file
 
-    if (!(multiboot_struct->flags & MULTIBOOT_INFO_MODS) || multiboot_struct->mods_count == 0) {
+    if (!found_init_module) {
         debug_print("Init ramdisk not provided. Cannot boot.\n");
-        arch_pause();
+        panic(NULL, -1, "Init ramdisk not provided. Cannot boot.\n");
     }
 
-    // Expect the init file to be the first module loaded
-    const struct multiboot_mod_list *module_list = (struct multiboot_mod_list*)(multiboot_struct->mods_addr + physical_map_base);
-    p_addr_t init_module_start = module_list[0].mod_start;
-    size_t init_module_length = module_list[0].mod_end - module_list[0].mod_start;
-
+    size_t init_module_length = init_module_end - init_module_start;
     debug_printf("Initrd.sys @ %#p, %#zx bytes long\n", init_module_start, init_module_length);
     reserved_memory_regions[0].base = init_module_start;
     reserved_memory_regions[0].length = init_module_length;
 
-    debug_printf("Multiboot struct @ %#p\n", multiboot_struct_physical);
-    reserved_memory_regions[1].base = multiboot_struct_physical;
-    reserved_memory_regions[1].length = sizeof(struct multiboot_info);
-
     reserved_ranges = reserved_memory_regions;
-    reserved_ranges_count = 2;
+    reserved_ranges_count = 1;
 
     // Generic startup tasks
     // After this we can use heap methods and memory mapping
     kernel_startup();
 
-    if (multiboot_struct->flags & MULTIBOOT_INFO_FRAMEBUFFER_INFO) {
-        if (multiboot_struct->framebuffer_type == MULTIBOOT_FRAMEBUFFER_TYPE_RGB) {
-            init_framebuffer(multiboot_struct->framebuffer_addr, multiboot_struct->framebuffer_width,
-                multiboot_struct->framebuffer_height, multiboot_struct->framebuffer_pitch, multiboot_struct->framebuffer_bpp);
-        }
-        else {
-            debug_printf("Framebuffer is type %hhd, not RGB!\n", multiboot_struct->framebuffer_type);
-        }
-    }
-    else {
+    if (found_framebuffer) {
+        init_framebuffer(framebuffer_addr, framebuffer_width, framebuffer_height,
+                         framebuffer_pitch, framebuffer_bpp);
+    } else {
         debug_printf("No framebuffer provided\n");
+    }
+
+    if (!found_rsdp) {
+        panic(NULL, -1, "RSDP not found. Cannot boot.\n");
     }
 
     // Read acpi tables for hardware information
     // Such as the number of CPUs
-    acpi_init();
+    acpi_init(rsdp_addr);
 
     // Setup the interrupt controller and enable the timer
     apic_init();

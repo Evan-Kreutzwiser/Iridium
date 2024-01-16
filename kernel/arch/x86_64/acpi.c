@@ -5,6 +5,7 @@
 #include <arch/x86_64/msr.h>
 #include <arch/x86_64/pit.h>
 #include <arch/registers.h>
+#include <kernel/main.h>
 #include <kernel/string.h>
 #include <kernel/memory/physical_map.h>
 #include <kernel/memory/v_addr_region.h>
@@ -90,33 +91,6 @@ static void record_acpi_table_address(const struct acpi_header* table) {
 extern page_table_entry kernel_pml4[512];
 
 static void find_acpi_tables() {
-    // Search the first MB of ram for the RSDP
-    paging_print_tables((uintptr_t)kernel_pml4 - KERNEL_VIRTUAL_ADDRESS, (uintptr_t)kernel_pml4);
-    paging_print_tables((uintptr_t)kernel_pml4 - KERNEL_VIRTUAL_ADDRESS, physical_map_base + 0xa0000);
-    volatile char *physical_memory = (volatile char *)(physical_map_base);
-    for (uint i = 0; i < 0x100000; i += 16) {
-        // Virtualbox has a problem that prevents me from accessing the area beginning at 0xa0000
-        // And its a standard framebuffer location so I don't expect to find it there anyway
-        if ((i < 0xa0000 || i >= 0xe0000) && strncmp((const char*)physical_memory, ACPI_RSDP_SIGNATURE, 8) == 0) {
-            rsdp = (void *)(physical_memory);
-            break;
-        }
-        physical_memory += 16;
-    }
-    //    }
-
-    //    if (rsdp) {break;}
-    //}
-
-    if (!rsdp) {
-        debug_printf("WARNGING: Failed to find rsdp!\n");
-        asm volatile ("ud2");
-        return;
-    }
-
-    debug_printf("Found RSDP @ %#p\n", rsdp);
-
-
     if (rsdp->revision < 2) {
         // Use RSDT for 32 bit addresses
         struct rsdt *rsdt = (struct rsdt*)(rsdp->rsdt_address + physical_map_base);
@@ -273,20 +247,21 @@ void io_apic_interrupt_redirection(int interrupt, int gsi) {
     io_apic_write(info->address, io_offset, gsi);
 }
 
-void acpi_init() {
+void acpi_init(v_addr_t rsdp_addr) {
 
+    rsdp = (struct acpi_rsdp_v2*)rsdp_addr;
     find_acpi_tables();
 
     debug_printf("Creating mmio vmo @ %#p\n", (uint64_t)madt->local_apic_address);
     ir_status_t status = vm_object_create_physical(madt->local_apic_address, PAGE_SIZE, VM_MMIO_FLAGS, &local_apic_mmio_vm_object);
     if (status != IR_OK) {
         debug_printf("lapic mmio reserving failed with code %d\n", status);
-        arch_pause();
+        panic(NULL, -1, "Local apic MMIO reserving failed.");
     }
     status = v_addr_region_map_vm_object(kernel_region, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE | V_ADDR_REGION_DISABLE_CACHE, local_apic_mmio_vm_object, NULL, 0, &local_apic_mmio_base);
     if (status != IR_OK) {
         debug_printf("lapic mmio mapping failed with code %d\n", status);
-        arch_pause();
+        panic(NULL, -1, "Local apic MMIO mapping failed.");
     }
 
     debug_printf("mmio mapped to %#p\n", local_apic_mmio_base);
@@ -309,6 +284,8 @@ void acpi_init() {
 
     cpu_count = count;
     debug_printf("Computer has %d CPUs\n", count);
+
+    paging_print_tables(get_kernel_address_space()->table_base, local_apic_mmio_base);
 
     // Get this core's apic id from the mmio registers
     uint8_t bsp_apic_id = *((uint32_t*)(local_apic_mmio_base + 0x20));

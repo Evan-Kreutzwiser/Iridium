@@ -174,7 +174,7 @@ void page_fault(registers *context) {
         is_in_page_fault = true;
         uint64_t cr3;
         asm volatile ("mov %%cr3, %%rax; mov %%rax, %0;" : "=m" (cr3) :: "rax");
-        paging_print_tables(cr3, accessed_address);
+        paging_print_tables((page_table_entry*)p_addr_to_physical_map(cr3), accessed_address);
     }
 
     char buffer[300];
