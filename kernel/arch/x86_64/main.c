@@ -3,7 +3,6 @@
 #include "arch/x86_64/paging.h"
 #include "kernel/arch/arch.h"
 #include "kernel/main.h"
-#include "kernel/memory/boot_allocator.h"
 #include "kernel/process.h"
 #include "kernel/memory/init.h"
 #include "kernel/memory/pmm.h"

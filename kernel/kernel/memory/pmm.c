@@ -2,7 +2,6 @@
 /// Physical memory manager
 
 #include "kernel/memory/pmm.h"
-#include "kernel/memory/boot_allocator.h"
 #include "kernel/memory/physical_map.h"
 #include "kernel/memory/init.h"
 #include "kernel/arch/mmu.h"
