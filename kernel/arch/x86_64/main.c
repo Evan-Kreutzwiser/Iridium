@@ -80,12 +80,8 @@ static void early_get_physical_memory_regions(struct multiboot_tag_mmap *mmap, s
             region->type = REGION_TYPE_UNUSABLE;
         }
 
-        debug_printf("Type %d memory region from %#lx to %#lx\n", region->type, region->base, region->base + region->length);
-
         regions_count++;
     }
-
-    debug_printf("%d mmap entries\n", regions_count);
 
     *regions = physical_memory_regions;
     *count = regions_count;

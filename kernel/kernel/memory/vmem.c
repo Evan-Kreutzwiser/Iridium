@@ -4,9 +4,13 @@
 #include "kernel/memory/physical_map.h"
 #include "kernel/memory/init.h"
 #include "arch/defines.h"
-#include <stdbool.h>
-
 #include "arch/debug.h"
+#include "align.h"
+#include <stdbool.h>
+#include <stddef.h>
+
+v_addr_t physical_map_base = 0xffff800000000000ul; // The physical map will be at -128 TB, the bottom of kernel space
+size_t physical_map_length =        0x8000000000ul; // 512 GB (Hardcoded memory limit)
 
 struct v_addr_region *kernel_region;
 
@@ -18,25 +22,19 @@ void virtual_memory_init() {
         debug_print("WARNING: Must set up kernel address space before calling!\n");
     }
 
-    vm_object *kernel_vm_object;
-    debug_print("Creating kernel region from pages\n");
-
-    vm_object_from_page_list(get_kernel_pages(), VM_READABLE | VM_WRITABLE | VM_EXECUTABLE, &kernel_vm_object);
-    // I started writing this and then realized that I don't need to make a vm object,
-    // just reserve the region with a `V_ADDR_REGION_MAP_SPECIFIC` v_addr_region in the root.
-
     debug_printf("Creaing root kernel v addr region\n");
 
     v_addr_region_create_root(get_kernel_address_space(), KERNEL_MEMORY_BASE, KERNEL_MEMORY_LENGTH, &kernel_region);
 
-    debug_printf("Kernel VMO size: %#zx, from %zd pages\n", kernel_vm_object->size, kernel_vm_object->page_count);
 
-    extern char _start; // Start of kernel in virtual memory
+    extern char _start; // Kernel bounds in virtual memory
+    extern char _end;
     uint64_t flags = V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE | V_ADDR_REGION_EXECUTABLE;
-    v_addr_region_create_specific(kernel_region, (v_addr_t)&_start, kernel_vm_object->size, flags, NULL, NULL);
+    // The pmm has already reserved the pages backing the kernel image,
+    // just reserve its virtual address range so nothing else overwrites it
+    v_addr_region_create_specific(kernel_region, (v_addr_t)&_start, ROUND_UP_PAGE((v_addr_t)&_end - (v_addr_t)&_start), flags, NULL, NULL);
 
     debug_printf("Physical map is %#lx bytes long\n", physical_map_length);
-
     v_addr_region_create_specific(kernel_region, physical_map_base, physical_map_length, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE, NULL, NULL);
 }
 

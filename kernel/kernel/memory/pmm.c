@@ -89,8 +89,8 @@ void physical_memory_init() {
     // (Note: Might lead to duplicate region allocation!)
     for (uint i = 0; i < regions_count; i++) {
         struct physical_region *region = &regions_array[i];
+        debug_printf("Region %u: %#zx bytes %s @ %#p\n", i, region->length, region_type_strings[region->type], region->base);
         if (region->type == REGION_TYPE_AVAILABLE) {
-            debug_printf("Region %u: %#zx bytes @ %#p\n", i, region->length, region->base);
             pmm_init_region(region);
         }
         initialized_regions++;
@@ -103,8 +103,9 @@ void physical_memory_init() {
         ir_status_t status = pmm_allocate_range(range->base, range->length, &range->pages);
         if (status) {
             debug_printf("Failed to reserve arch-requested region %#p-%#p - error %d\n", range->base, range->base + range->length, status);
+        } else {
+            debug_printf("Reserved arch range %#p-%#p\n", range->base, range->base + range->length);
         }
-        debug_printf("Reserved arch range %#p-%#p\n", range->base, range->base + range->length);
     }
 
     debug_printf("Computer has %#zx bytes of available memory\n", memory_free + memory_used);
@@ -113,13 +114,6 @@ void physical_memory_init() {
     size_t kernel_size = (uint64_t)&_end_physical - (uint64_t)&_start_physical;
     debug_printf("Allocating %#zx byte kernel range at %#p\n", kernel_size, (uint64_t)&_start_physical);
     pmm_allocate_range((uint64_t)&_start_physical, kernel_size, &kernel_pages);
-
-    size_t page_count = 0;
-    physical_page_info *page = kernel_pages;
-    while (page != NULL) {
-        page_count++;
-        page = page->next;
-    }
 }
 
 /// Setup a physical memory region to preapre it for allocating pages
@@ -139,7 +133,7 @@ static void pmm_init_region(struct physical_region *region) {
     // If the region is too small just mark it as reserved as forget about it
     if (page_array_size >= region->length) {
         region->type = REGION_TYPE_UNUSABLE;
-        return; // Trying to set it up could result in accesses to invalid memory
+        return; // Trying to set it up might result in using broken memory
     }
 
     // Back available regions' page data with pages carved from themselves
@@ -159,10 +153,6 @@ static void pmm_init_region(struct physical_region *region) {
             physical_page_info *page = &page_array[i];
 
             page->address = physical_address;
-
-            if (region->base == 0) {
-                //debug_printf("Page: %#p %#p, ", page, page->address);
-            }
             page->prev = NULL;
             page->next = NULL;
             if (i < array_start_index) { // Free pages
@@ -171,7 +161,6 @@ static void pmm_init_region(struct physical_region *region) {
             }
             else { // Pages used to back the page array
                 page->state = PAGE_STATE_USED;
-                //debug_printf("%#p backing page array, used\n", page->address);
             }
 
             physical_address += PAGE_SIZE;
@@ -358,8 +347,6 @@ ir_status_t pmm_allocate_range(p_addr_t address, size_t length, physical_page_in
     for (uint i = 0; i < regions_count; i++) {
         region = &regions_array[i];
 
-        //debug_printf("PMM: %d: %d, %#p, %#p, %d\n", i, (region->base <= address), region->base + region->length, address + length, (region->base + region->length >= address + length));
-
         // TODO: Fail when partially overlapping instead of creating new `physical_page_info`s
         if ((region->base <= address) && (region->base + region->length >= address + length)
                 && region->type == REGION_TYPE_AVAILABLE) {
@@ -441,7 +428,6 @@ ir_status_t pmm_allocate_range(p_addr_t address, size_t length, physical_page_in
         page->address = address;
         previous->next = page;
         previous = page;
-        //debug_printf("PMM: Allocate page %#p for reserved range", address);
     }
     previous->next = NULL;
     memory_used += page_count * PAGE_SIZE;

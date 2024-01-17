@@ -5,10 +5,9 @@
 // The physical map is a linear mapping of physical memory to kernel space
 
 #include <types.h>
-#include <stdint.h>
 #include <stddef.h>
 
-extern uintptr_t physical_map_base; // Where all of physical memory is mapped in kernel space
+extern v_addr_t physical_map_base; // Where all of physical memory is mapped in kernel space
 extern size_t physical_map_length; // Size in bytes
 
 // Conversions to and from physical map addresses
