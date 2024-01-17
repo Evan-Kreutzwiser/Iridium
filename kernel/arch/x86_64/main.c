@@ -227,12 +227,10 @@ void arch_main(p_addr_t multiboot_physical_addr) {
         panic(NULL, -1, "RSDP not found. Cannot boot.\n");
     }
 
-    // Read acpi tables for hardware information
-    // Such as the number of CPUs
-    acpi_init(rsdp_addr + physical_map_base);
 
-    // Setup the interrupt controller and enable the timer
-    apic_init();
+    // Read acpi tables for hardware information such as the number
+    // of CPUs, setup the timer and configure interrupts
+    acpi_init(rsdp_addr + physical_map_base);
 
     // Gather processor information and initialize APs
     smp_init();

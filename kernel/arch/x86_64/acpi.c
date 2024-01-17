@@ -151,12 +151,15 @@ void apic_init() {
     // Set the enable flag in the APIC's msr
     const long apic_base = rdmsr(MSR_APIC_BASE);
     debug_printf("APIC base: %#p - enabled: %d\n", apic_base, (apic_base & MSR_APIC_BASE_ENABLE) != 0);
-    wrmsr(MSR_APIC_BASE, apic_base | MSR_APIC_BASE_ENABLE);
+    wrmsr(MSR_APIC_BASE, (apic_base & ~0xfffful) | MSR_APIC_BASE_ENABLE);
     // Enable this cpu's local apic
     // Bit 8 is the enable  flag
     // The APIC requires a Spurious interrupt vector to enable, we use vector 0xff
     apic_io_output(APIC_SPURIOUS_INT_VECTOR, apic_io_input(APIC_SPURIOUS_INT_VECTOR) | 0x1ff);
+}
 
+// Initialize the cpu's local apic timer
+void timer_init() {
     pit_init();
 
     // Set timer divier to 16
@@ -266,6 +269,9 @@ void acpi_init(v_addr_t rsdp_addr) {
 
     debug_printf("mmio mapped to %#p\n", local_apic_mmio_base);
 
+    // Setup the interrupt controller and enable the timer
+    apic_init();
+
     // Count the number of processor local APIC's, which will
     // equal the number of cpu cores in the system
     int count = 0;
@@ -286,6 +292,8 @@ void acpi_init(v_addr_t rsdp_addr) {
     debug_printf("Computer has %d CPUs\n", count);
 
     paging_print_tables(get_kernel_address_space()->table_base, local_apic_mmio_base);
+
+    paging_print_tables(get_kernel_address_space()->table_base, 0xffff800000000000);
 
     // Get this core's apic id from the mmio registers
     uint8_t bsp_apic_id = *((uint32_t*)(local_apic_mmio_base + 0x20));
@@ -349,6 +357,9 @@ void acpi_init(v_addr_t rsdp_addr) {
 
     // TODO: This shouldn't be hardcoded but I wanted to test the interrupt api
     io_apic_interrupt_redirection(1, 34);
+
+    // Now knowing which interrupt the pit maps to, we can use it to calibrate a more precise timer
+    timer_init();
 }
 
 
