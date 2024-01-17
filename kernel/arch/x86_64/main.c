@@ -131,23 +131,19 @@ void arch_main(p_addr_t multiboot_physical_addr) {
 
     uintptr_t rsdp_addr;
 
+
+    extern struct physical_region *regions_array;
+    extern size_t regions_count;
+
     struct multiboot_tag *tag = (void*)(multiboot_physical_addr + 8);
     while (tag->type != MULTIBOOT_TAG_TYPE_END) {
         debug_printf("Multiboot tag - Type %d, size %#x\n", tag->type, tag->size);
         switch (tag->type) {
             case MULTIBOOT_TAG_TYPE_MMAP:
                 found_memory = true;
-                extern struct physical_region *regions_array;
-                extern size_t regions_count;
                 early_get_physical_memory_regions((void*)tag, &regions_array, &regions_count);
 
                 debug_printf("%#zd memory regions present\n", regions_count);
-
-                // Create the physical map in kernel space
-                paging_init(physical_memory_regions, regions_count);
-                // Memory is no longer identity mapped, so access the multiboot info through
-                // the physical memory map instead
-                tag = (void*)p_addr_to_physical_map(tag);
                 break;
 
             case MULTIBOOT_TAG_TYPE_FRAMEBUFFER:
@@ -182,9 +178,6 @@ void arch_main(p_addr_t multiboot_physical_addr) {
                 if (!found_rsdp || tag->type == MULTIBOOT_TAG_TYPE_ACPI_NEW){
                     found_rsdp = true;
                     rsdp_addr = (uintptr_t)&tag[1];
-                    // Tag order is not guarenteed so the address may or may not be in the physical map already
-                    if (rsdp_addr < physical_map_base) rsdp_addr += physical_map_base;
-
                     debug_printf("Multiboot provided rsdp pointer: %#p\n", rsdp_addr);
                 }
                 break;
@@ -197,6 +190,11 @@ void arch_main(p_addr_t multiboot_physical_addr) {
         debug_print("Memory map not provided, cannot boot.\n");
         arch_pause();
     }
+
+    ////////////////////////////
+    // After this point the physical map is present and the lower half identity map is gone
+    // Create the physical map in kernel space
+    paging_init(physical_memory_regions, regions_count);
 
     // Find regions we want protected and tell the pmm to save them for us while it initalizes
     // such as the initrd file
@@ -231,7 +229,7 @@ void arch_main(p_addr_t multiboot_physical_addr) {
 
     // Read acpi tables for hardware information
     // Such as the number of CPUs
-    acpi_init(rsdp_addr);
+    acpi_init(rsdp_addr + physical_map_base);
 
     // Setup the interrupt controller and enable the timer
     apic_init();
