@@ -222,7 +222,7 @@ void timer_init() {
 
 
     if (hpet) {
-        int hpet_irq;
+        int hpet_irq = -1;
         framebuffer_print("Setting up HPET\n");
         extern char irq_pit;
         idt_set_entry(33, 0x8, (uintptr_t)&irq_pit, IDT_GATE_INTERRUPT, 0); // Sets the oneshot fired variable
@@ -247,6 +247,10 @@ void timer_init() {
         }
         framebuffer_print("\n");
 
+        if (hpet_irq < 0) {
+            panic(NULL, -1, "HPET cannot be assigned an IRQ\n");
+        }
+
         // Set timer comparator registers
         uint64_t period = (*(uint64_t*)(hpet_mmio_base) >> 32) & 0xffffffff;
         uint64_t interval = ROUND_UP(10000000000000, period); // Wait 10 milliseconds (1+E13)(counter is in femtoseconds)
@@ -255,15 +259,15 @@ void timer_init() {
         *(uint64_t*)(hpet_mmio_base + HPET_CONFIGURATION) = (config_register & ~0b10) | 1; // Enable HPET (without legacy interrupt mapping)
 
         uint64_t main_counter = *(uint64_t*)(hpet_mmio_base + 0xF0);
-        *(uint64_t*)(hpet_mmio_base + 0x108) = main_counter + interval;
+        *(uint64_t*)(hpet_mmio_base + 0x148) = main_counter + interval;
 
         // Set timer configuration register
         io_apic_interrupt_redirection(hpet_irq, 33);
         framebuffer_printf("Mapped HPET irq to %d\n", hpet_irq);
-        *(uint64_t*)(hpet_mmio_base + 0x100) = (hpet_irq << 9) | (1 << 2);
+        *(uint64_t*)(hpet_mmio_base + 0x140) = (hpet_irq << 9) | (1 << 2);
 
 
-        if ((*(uint64_t*)(hpet_mmio_base + 0x100) >> 9 & 0b11111) != hpet_irq) {
+        if ((*(uint64_t*)(hpet_mmio_base + 0x140) >> 9 & 0b11111) != hpet_irq) {
             framebuffer_printf("HPET didn't accept destination, used %d instead\n", *(uint64_t*)(hpet_mmio_base + 0x100) >> 9 & 0b11111);
         }
     } else {

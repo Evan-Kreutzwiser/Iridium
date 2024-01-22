@@ -122,7 +122,7 @@ void early_get_physical_memory_regions_efi(struct multiboot_tag_efi_mmap *mmap, 
     size_t regions_count = 0;
     struct efi_mmap_entry *entry;
 
-    p_addr_t previous_end;
+    p_addr_t previous_end = -1;
     int previous_type = -1;
     struct physical_region *region;
     for (entry = (void*)mmap->efi_mmap;
@@ -206,20 +206,20 @@ void arch_main(p_addr_t multiboot_physical_addr) {
         debug_print("1G pages supported\n");
     }
 
-    p_addr_t framebuffer_addr;
-    int framebuffer_width;
-    int framebuffer_height;
-    int framebuffer_pitch;
-    int framebuffer_bpp;
+    p_addr_t framebuffer_addr = 0;
+    int framebuffer_width = 0;
+    int framebuffer_height = 0;
+    int framebuffer_pitch = 0;
+    int framebuffer_bpp = 0;
 
-    uintptr_t rsdp_addr;
+    uintptr_t rsdp_addr = 0;
 
 
     extern struct physical_region *regions_array;
     extern size_t regions_count;
 
-    void *memory_tag;
-    void *efi_memory_tag;
+    void *memory_tag = NULL;
+    void *efi_memory_tag = NULL;
 
     struct multiboot_tag *tag = (void*)(multiboot_physical_addr + 8);
     while (tag->type != MULTIBOOT_TAG_TYPE_END) {

@@ -29,8 +29,8 @@ struct psf_font_header {
     uint32_t width;
 };
 
-extern char FONT_START;
-extern char FONT_END;
+extern const void FONT_START;
+extern const void FONT_END;
 
 vm_object *framebuffer_vm_object;
 v_addr_t framebuffer;
