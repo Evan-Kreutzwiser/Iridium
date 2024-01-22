@@ -238,7 +238,7 @@ void keyboard_thread() {
     }
 
 
-    int position = pitch * 20 + (bpp * 16);
+    int position = pitch * 20 + (bpp/8 * 128);
 
     while (1) {
         // Wait for interrupt
@@ -274,22 +274,9 @@ void thread_entry() {
         //syscall_1(SYSCALL_YIELD, 0);
     //}
 
-    int position = pitch * 100 + (bpp * 32);
-    for (int i = 0; i < 64; i++, position += pitch) {
-        for (int j = 0; j < 64; j++) {
-            //int x = wait();
-
-            framebuffer[position + (j * (bpp / 8))] = 128;
-            framebuffer[position + (j * (bpp / 8)) + 1] = 255 - i * 4;
-            framebuffer[position + (j * (bpp / 8)) + 2] = j*4;
-        }
-        //syscall_1(SYSCALL_YIELD, 0);
-    }
-
-    sys_print("Done 2");
     int x = 0;
     while (1) {
-        int position = pitch * 100 + (bpp * 32);
+        int position = pitch * 164 + (bpp/8 * 664);
         for (int i = 0; i < 64; i++, position += pitch) {
             for (int j = 0; j < 64; j++) {
                 framebuffer[position + (j * (bpp / 8))+1] = x;
@@ -309,7 +296,7 @@ void _start(void) {
         status = v_addr_region_map(ROOT_V_ADDR_REGION_HANDLE, framebuffer_handle, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE, &region_handle, &framebuffer);
         if (status == IR_OK ) {
             syscall_2(SYSCALL_SERIAL_OUT, (long)"Framebuffer successfully mapped to %#p\n", (long)framebuffer);
-            int position = 0;
+            int position = pitch * 100 + (bpp/8 * 600);
             for (int i = 0; i < 64; i++, position += pitch) {
                 for (int j = 0; j < 64; j++) {
                     framebuffer[position + (j * (bpp / 8))] = 128;
@@ -322,21 +309,9 @@ void _start(void) {
 
             spawn_thread(keyboard_thread);
 
-            position = pitch * 100;
-            for (int i = 0; i < 16; i++, position += pitch) {
-                for (int j = 0; j < 64; j++) {
-                    //int x = wait();
-                    framebuffer[position + (j * (bpp / 8))] = 200;
-                    framebuffer[position + (j * (bpp / 8)) + 1] = 255 - i*4;
-                    framebuffer[position + (j * (bpp / 8)) + 2] = 255 - j*4;
-                }
-                //syscall_1(SYSCALL_YIELD, 0);
-            }
-            sys_print("Done 1");
-
             int x = 0;
             while (1) {
-                position = pitch * 100;
+                position = pitch * 100 + 664 * bpp/8;
                 for (int i = 0; i < 64; i++, position += pitch) {
                     for (int j = 0; j < 64; j++) {
                         framebuffer[position + (j * (bpp / 8))] = x;
