@@ -134,8 +134,7 @@ void paging_init(struct physical_region *memory_regions, size_t count) {
         if (memory_regions[i].length > largest_region->length && memory_regions[i].type == REGION_TYPE_AVAILABLE) {
             largest_region = &memory_regions[i];
         }
-        if (memory_regions[i].type == REGION_TYPE_AVAILABLE &&
-                memory_regions[i].base + memory_regions[i].length > highest_physical_address) {
+        if (memory_regions[i].base + memory_regions[i].length > highest_physical_address) {
             highest_physical_address = memory_regions[i].base + memory_regions[i].length;
         }
     }
@@ -220,7 +219,7 @@ ir_status_t arch_mmu_map(address_space *addr_space, v_addr_t address, size_t cou
     uint64_t page_flags = PAGE_PRESENT;
     if (flags & V_ADDR_REGION_WRITABLE) page_flags |= PAGE_WRITABLE;
     if (~flags & V_ADDR_REGION_EXECUTABLE) page_flags |= PAGE_NO_EXECUTE;
-    if (flags & V_ADDR_REGION_DISABLE_CACHE) page_flags |= PAGE_CACHE_DISABLE;
+    if (flags & V_ADDR_REGION_DISABLE_CACHE) page_flags |= PAGE_CACHE_DISABLE | PAGE_WRITE_THROUGH;
 
     if (arch_is_kernel_pointer((void*)address)) page_flags |= PAGE_GLOBAL;
     else page_flags |= PAGE_USER;

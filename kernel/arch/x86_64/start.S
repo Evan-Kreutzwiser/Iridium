@@ -40,8 +40,8 @@ multiboot2_header:
     .word MULTIBOOT_HEADER_TAG_FRAMEBUFFER
     .word 0
     .long 20 // Tag is 20 bytes large
-    .long 0 // No prefered resolution (width)
-    .long 0 //                        (height)
+    .long 1920 // No prefered resolution (width)
+    .long 1080 //                        (height)
     .long 32 // Prefer 32 bits per pixel
 
     // Page-align modules

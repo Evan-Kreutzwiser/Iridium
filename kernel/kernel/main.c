@@ -134,6 +134,7 @@ void kernel_main(v_addr_t initrd_start_address) {
 
 void panic(struct registers *context, int error_code, char *message) {
     framebuffer_fill_screen(0x04, 0xb2, 0xd1);
+    framebuffer_set_cursor_pos(0,0);
 
     framebuffer_printf("KERNEL PANIC!\nError code %d:\n\n", error_code);
     framebuffer_printf("Iridium has encountered an unrecoverable error\n\n");

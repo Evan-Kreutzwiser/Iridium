@@ -78,10 +78,7 @@ void init_framebuffer(p_addr_t location, int width, int height, int pitch, int b
     max_x = width / 8;
     max_y = height / 16;
 
-    // Prevent the framebuffer from being deleted if a process removes its handle
-    framebuffer_vm_object->object.references++;
-
-    debug_printf("Framebuffer at %#p is %d by %d pixels, %#zx bytes large\n", location, width, height, pitch * height);
+    debug_printf("Framebuffer at %#p is %d by %d pixels, %d bpp, %#zx bytes large\n", location, width, height, bits_per_pixel, pitch * height);
 
     if (fb_bits_per_pixel != 32) {
         debug_printf("WARNING: Framebuffer not 32 bits per pixel\n");

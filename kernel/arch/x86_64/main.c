@@ -21,6 +21,34 @@
 #include <stdbool.h>
 #include <stdnoreturn.h>
 
+enum {
+  EFI_RESERVED_MEMORY,
+  EFI_LOADER_CODE,
+  EFI_LOADER_DATA,
+  EFI_BOOT_SERVICES_CODE,
+  EFI_BOOT_SERVICES_DATA,
+  EFI_RUNTIME_SERVICES_CODE,
+  EFI_RUNTIME_SERVICES_DATA,
+  EFI_CONVENTIONAL_MEMORY,
+  EFI_UNUSABLE_MEMORY,
+  EFI_ACPI_RECLAIM_MEMORY,
+  EFI_ACPI_MEMORY_NVS,
+  EFI_MEMORY_MAPPED_IO,
+  EFI_MEMORY_MAPPED_IO_PORT_SPACE,
+  EFI_PAL_CODE,
+  EFI_PERSISTENT_MEMORY,
+  EFI_MAX_MEMORY_TYPE
+};
+
+struct efi_mmap_entry {
+    uint32_t type; // Memory type from above list
+    uint32_t padding;
+    p_addr_t physical_start;
+    v_addr_t virtual_start;
+    uint64_t pages_count;
+    uint64_t attribute;
+};
+
 #define CPUID_FEATURE_LEAF 1
 #define CPUID_EDX_PSE (1 << 3)
 #define CPUID_EDX_PAE (1 << 6)
@@ -32,9 +60,10 @@
 #define CPUID_EXTENDED_EDX_1G (1 << 26)
 
 // Trying to dynamically allocate this before the heap (or even the physical memory
-// manager for that matter) is prepared proved problematic. 32 *should* be enough
-// for any system, but if its not, this should be expanded.
-#define MAX_MEMORY_REGIONS 32
+// manager for that matter) is prepared proved problematic. 128 *should* be enough
+// for any system, even with how much grub splits up the efi memory map, but if its
+// not this should be expanded.
+#define MAX_MEMORY_REGIONS 128
 struct physical_region physical_memory_regions[MAX_MEMORY_REGIONS];
 
 struct arch_reserved_range reserved_memory_regions[1];
@@ -46,6 +75,7 @@ extern size_t reserved_ranges_count;
 bool found_framebuffer = false;
 bool found_init_module = false;
 bool found_memory = false;
+bool found_efi_memory = false;
 bool found_rsdp = false;
 
 p_addr_t init_module_start;
@@ -85,6 +115,59 @@ static void early_get_physical_memory_regions(struct multiboot_tag_mmap *mmap, s
 
     *regions = physical_memory_regions;
     *count = regions_count;
+}
+
+void early_get_physical_memory_regions_efi(struct multiboot_tag_efi_mmap *mmap, struct physical_region **regions, size_t *count) {
+    debug_printf("Using efi memory map\n");
+    size_t regions_count = 0;
+    struct efi_mmap_entry *entry;
+
+    p_addr_t previous_end;
+    int previous_type = -1;
+    struct physical_region *region;
+    for (entry = (void*)mmap->efi_mmap;
+            ((uintptr_t)entry < (uintptr_t)mmap + mmap->size) && regions_count < MAX_MEMORY_REGIONS;
+            entry = (void*)((uintptr_t)entry + mmap->descr_size)
+        ) {
+
+        debug_printf("EFI MMAP Entry: %#p, %#p bytes, type %d\n", entry->physical_start, entry->pages_count * PAGE_SIZE, entry->type);
+
+        // Translate mulitboot memory type to a generic type
+        int type;
+        switch (entry->type) {
+            case EFI_LOADER_CODE:
+            case EFI_LOADER_DATA:
+            case EFI_BOOT_SERVICES_CODE:
+            case EFI_BOOT_SERVICES_DATA:
+            case EFI_CONVENTIONAL_MEMORY:
+                type = REGION_TYPE_AVAILABLE;
+                break;
+            case EFI_ACPI_RECLAIM_MEMORY:
+                type = REGION_TYPE_RECLAIMABLE;
+                break;
+            default:
+                type = REGION_TYPE_RESERVED;
+        }
+
+        if (entry->physical_start == previous_end && type == previous_type) {
+            region->length += entry->pages_count * PAGE_SIZE;
+            debug_printf("Merged with previous\n");
+        }
+        else {
+            region = &physical_memory_regions[regions_count];
+            region->base = entry->physical_start;
+            region->length = entry->pages_count * PAGE_SIZE;
+            region->type = type;
+            regions_count++;
+        }
+
+        previous_end = region->length + region->base;
+        previous_type = type;
+    }
+
+    *regions = physical_memory_regions;
+    *count = regions_count;
+
 }
 
 void arch_main(p_addr_t multiboot_physical_addr) {
@@ -135,20 +218,31 @@ void arch_main(p_addr_t multiboot_physical_addr) {
     extern struct physical_region *regions_array;
     extern size_t regions_count;
 
+    void *memory_tag;
+    void *efi_memory_tag;
+
     struct multiboot_tag *tag = (void*)(multiboot_physical_addr + 8);
     while (tag->type != MULTIBOOT_TAG_TYPE_END) {
         debug_printf("Multiboot tag - Type %d, size %#x\n", tag->type, tag->size);
         switch (tag->type) {
             case MULTIBOOT_TAG_TYPE_MMAP:
                 found_memory = true;
-                early_get_physical_memory_regions((void*)tag, &regions_array, &regions_count);
+                memory_tag = tag;
+                break;
 
-                debug_printf("%#zd memory regions present\n", regions_count);
+            case MULTIBOOT_TAG_TYPE_EFI_MMAP:
+                found_efi_memory = true;
+                efi_memory_tag = tag;
                 break;
 
             case MULTIBOOT_TAG_TYPE_FRAMEBUFFER:
                 struct multiboot_tag_framebuffer_common *framebuffer = (void*)tag;
-                if (framebuffer->framebuffer_type == MULTIBOOT_FRAMEBUFFER_TYPE_RGB) {
+                if (framebuffer->framebuffer_type == MULTIBOOT_FRAMEBUFFER_TYPE_RGB
+                    && framebuffer->framebuffer_width > 0
+                    && framebuffer->framebuffer_height > 0
+                    && framebuffer->framebuffer_pitch > 0
+                    && framebuffer->framebuffer_bpp > 0
+                ) {
                     found_framebuffer = true;
                     framebuffer_addr = framebuffer->framebuffer_addr;
                     framebuffer_width = framebuffer->framebuffer_width;
@@ -186,10 +280,16 @@ void arch_main(p_addr_t multiboot_physical_addr) {
         tag = (void*)ROUND_UP((uintptr_t)tag + tag->size, 8);
     }
 
-    if (!found_memory) {
+    if (found_efi_memory) {
+        early_get_physical_memory_regions_efi(efi_memory_tag, &regions_array, &regions_count);
+    } else if (found_memory) {
+        early_get_physical_memory_regions(memory_tag, &regions_array, &regions_count);
+    } else {
         debug_print("Memory map not provided, cannot boot.\n");
-        arch_pause();
+        panic(NULL, -1, "Memory map not provided\n");
     }
+
+    debug_printf("%#zd memory regions present\n", regions_count);
 
     ////////////////////////////
     // After this point the physical map is present and the lower half identity map is gone
@@ -219,6 +319,8 @@ void arch_main(p_addr_t multiboot_physical_addr) {
     if (found_framebuffer) {
         init_framebuffer(framebuffer_addr, framebuffer_width, framebuffer_height,
                          framebuffer_pitch, framebuffer_bpp);
+        // Indicate visually that the framebuffer is working by tinting it dark blue
+        framebuffer_fill_screen(5,18,41);
     } else {
         debug_printf("No framebuffer provided\n");
     }
@@ -227,10 +329,11 @@ void arch_main(p_addr_t multiboot_physical_addr) {
         panic(NULL, -1, "RSDP not found. Cannot boot.\n");
     }
 
-
     // Read acpi tables for hardware information such as the number
     // of CPUs, setup the timer and configure interrupts
     acpi_init(rsdp_addr + physical_map_base);
+
+    framebuffer_print("ACPI setup complete\n");
 
     // Gather processor information and initialize APs
     smp_init();

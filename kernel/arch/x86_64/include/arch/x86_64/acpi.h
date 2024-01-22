@@ -46,6 +46,24 @@ struct xsdt {
     uint64_t sdt_pointers[];
 } __attribute__((packed));
 
+struct io_address_structure
+{
+    uint8_t address_space_id;    // 0 - system memory, 1 - system I/O
+    uint8_t register_bit_width;
+    uint8_t register_bit_offset;
+    uint8_t reserved;
+    uint64_t address;
+} __attribute__((packed));
+
+struct acpi_hpet {
+    struct acpi_header header;
+    uint32_t event_timer_block_id;
+    struct io_address_structure base_address;
+    uint8_t hpet_number; // Systems might have multiple HPETs?
+    uint16_t minimum_clock_tick; // Main counter minimum clock tick in periodic mode
+    uint8_t page_protection_attribute; // Systems might have multiple HPETs?
+} __attribute__((packed));
+
 // This struct is followed by entries describing APICs
 struct acpi_madt {
     struct acpi_header header;

@@ -87,12 +87,47 @@ irq_pointers:
 .type irq_pit, @function
 irq_pit:
     swap_gs
+    # Store registers
+    pushq %r15
+    pushq %r14
+    pushq %r13
+    pushq %r12
+    pushq %r11
+    pushq %r10
+    pushq %r9
+    pushq %r8
+    pushq %rbp
+    pushq %rdi
+    pushq %rsi
+    pushq %rdx
+    pushq %rcx
+    pushq %rbx
+    pushq %rax
+
     .extern oneshot_triggered
     movb $1, oneshot_triggered
 
     .extern apic_send_eoi
     .type apic_send_eoi, @function
     call apic_send_eoi
+
+    # Restore register values
+    popq %rax
+    popq %rbx
+    popq %rcx
+    popq %rdx
+    popq %rsi
+    popq %rdi
+    popq %rbp
+    popq %r8
+    popq %r9
+    popq %r10
+    popq %r11
+    popq %r12
+    popq %r13
+    popq %r14
+    popq %r15
+
     swap_gs
     iretq
 

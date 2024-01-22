@@ -80,5 +80,6 @@ int64_t syscall_handler(unsigned int syscall_num, long arg0, long arg1, long arg
 int64_t sys_serial_out(long string, long arg1, long arg2, long arg3, long arg4) {
     // This is a debugging call only, and does no error checking!
     debug_printf((char*)string, arg1, arg2, arg3, arg4);
+    framebuffer_printf((char*)string, arg1, arg2, arg3, arg4);
     return IR_OK;
 }

@@ -37,7 +37,7 @@
 #define V_ADDR_REGION_WRITABLE 0x2
 #define V_ADDR_REGION_EXECUTABLE 0x4
 #define V_ADDR_REGION_MAP_SPECIFIC 0x8
-#define V_ADDR_REGION_DISABLE_CACHE 0x10
+#define V_ADDR_REGION_DISABLE_CACHE 0x10 // Disable caching and use write-through
 
 #define VM_READABLE 0x1
 #define VM_WRITABLE 0x2
