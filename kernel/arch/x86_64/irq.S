@@ -83,9 +83,9 @@ irq_pointers:
 .endm
 
 
-.global irq_pit
-.type irq_pit, @function
-irq_pit:
+.global timer_calibration_irq
+.type timer_calibration_irq, @function
+timer_calibration_irq:
     swap_gs
     # Store registers
     pushq %r15

@@ -190,7 +190,7 @@ char keyboard_read() {
 }
 
 char keyboard_write(unsigned char value) {
-    int attempts = 1000;
+    int attempts = 100000;
 
     while(attempts--) {
         if (!(inportb(ps2_ports, STATUS_PORT_OFFSET) & 2)) {
@@ -251,9 +251,13 @@ void keyboard_thread() {
 
         sys_print("Int");
         // Read byte
-        value = keyboard_read();
+        value = inportb(ps2_ports, DATA_PORT_OFFSET);
         syscall_2(SYSCALL_SERIAL_OUT, (long)"%c", keys[value]);
-
+        syscall_2(SYSCALL_SERIAL_OUT, (long)"(%x)  ", value);
+        while (value != 'e') {
+            value = keyboard_read();
+            syscall_2(SYSCALL_SERIAL_OUT, (long)"(%x)", value);
+        }
         for (int i = 0; i < 64; i++, position += pitch) {
             for (int j = 0; j < 64; j++) {
                 framebuffer[position + (j * (bpp / 8))] = 128;

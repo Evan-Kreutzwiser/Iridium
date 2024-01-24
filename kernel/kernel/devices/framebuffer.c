@@ -167,6 +167,11 @@ void framebuffer_print(const char* string) {
             cursor_y++;
         }
 
+        if (cursor_y >= max_y) {
+            framebuffer_fill_screen(0,0,0);
+            framebuffer_set_cursor_pos(0, 0);
+        }
+
         string++;
     }
 }

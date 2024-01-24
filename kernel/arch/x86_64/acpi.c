@@ -61,9 +61,11 @@
 #define HPET_INTERRUPT_STATUS 0x20
 #define HPET_MAIN_COUNTER 0xF0
 
+#define SECOND_IN_FEMTOSECONDS 0x38D7EA4C68000
+
 const struct acpi_rsdp_v2 *rsdp = NULL;
 const struct acpi_madt *madt = NULL;
-const struct acpi_header *fadt = NULL;
+const struct acpi_fadt *fadt = NULL;
 const struct acpi_header *srat = NULL;
 const struct acpi_header *ssdt = NULL;
 const struct acpi_hpet *hpet = NULL;
@@ -91,11 +93,12 @@ static void record_acpi_table_address(const struct acpi_header* table) {
         madt = (struct acpi_madt*)table;
     }
     else if (strncmp(table->signature, "FACP", 4) == 0) {
-        fadt = table;
+        fadt = (struct acpi_fadt*)table;
     }
     else if (strncmp(table->signature, "SRAT", 4) == 0) {
         srat = table;
     }
+    // TODO: A computer can have multiple of these?
     else if (strncmp(table->signature, "SSDT", 4) == 0) {
         ssdt = table;
     }
@@ -167,7 +170,7 @@ uint32_t io_apic_read(uintptr_t io_apic_base, int offset) {
 /// @brief
 /// @param interrupt IO APIC interrupt line
 /// @param gsi Interrupt number in the CPU's interrupt table
-void io_apic_interrupt_redirection(int interrupt, int gsi) {
+void io_apic_interrupt_redirection(int interrupt, int gsi, bool active_high, bool level_triggered) {
 
     struct io_apic_info *info = NULL;
     for (int i = 0; i < io_apic_count; i++) {
@@ -185,7 +188,10 @@ void io_apic_interrupt_redirection(int interrupt, int gsi) {
 
     int io_offset = (interrupt - info->base) * 2 + IO_APIC_REDIRECTION_TABLE_BASE;
 
-    io_apic_write(info->address, io_offset, gsi);
+    io_apic_write(info->address, io_offset, gsi | (!active_high << 13) | (level_triggered << 15));
+    io_apic_write(info->address, io_offset+1, this_cpu->arch.local_apic_id << 24);
+
+    framebuffer_printf("Set redir entry %d to %#x, %#x\n", interrupt, io_apic_read(info->address, io_offset), io_apic_read(info->address, io_offset+1));
 }
 
 /// Read a value from the apic's mmio registers
@@ -220,24 +226,20 @@ void apic_init() {
 // Initialize the cpu's local apic timer
 void timer_init() {
 
-
     if (hpet) {
         int hpet_irq = -1;
         framebuffer_print("Setting up HPET\n");
-        extern char irq_pit;
-        idt_set_entry(33, 0x8, (uintptr_t)&irq_pit, IDT_GATE_INTERRUPT, 0); // Sets the oneshot fired variable
+        extern char timer_calibration_irq;
+        idt_set_entry(33, 0x8, (uintptr_t)&timer_calibration_irq, IDT_GATE_INTERRUPT, 0); // Sets the oneshot fired variable
         vm_object_create_physical(hpet->base_address.address, PAGE_SIZE, VM_MMIO_FLAGS, &hpet_mmio_vm_object);
         v_addr_region_map_vm_object(kernel_region, V_ADDR_REGION_DISABLE_CACHE | V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE, hpet_mmio_vm_object, &hpet_mmio_v_addr_region, 0, &hpet_mmio_base);
 
-        bool supports_legacy_remapping = *(uint64_t*)hpet_mmio_base >> 15 & 1;
-        bool supports_64_bit = *(uint64_t*)hpet_mmio_base >> 13 & 1;
-        int comparator_count = *(uint64_t*)hpet_mmio_base >> 8 & 0b11111;
-        framebuffer_printf("HPET: Supports legacy remapping: %d, comparator count: %d, supports 64 bit: %d\n",
-            supports_legacy_remapping, comparator_count + 1, supports_64_bit);
+        // Disable HPET (until setup is done) and turn off legacy mapping
+        *(uint64_t volatile*)(hpet_mmio_base + HPET_CONFIGURATION) = 0;
 
         // Get a bitmap of every irq line the first comparator supports
-        framebuffer_print("Supported IRQ #s: ");
-        uint32_t supported_interrupts = *(uint64_t*)(hpet_mmio_base + 0x100) >> 32;
+        framebuffer_print("Supported IRQ #s:");
+        uint32_t supported_interrupts = *(uint64_t volatile*)(hpet_mmio_base + 0x140) >> 32;
         for (int i = 0; i < 31; i++) {
             if (supported_interrupts & 1) {
                 framebuffer_printf("%d ", i);
@@ -247,51 +249,42 @@ void timer_init() {
         }
         framebuffer_print("\n");
 
-        if (hpet_irq < 0) {
-            panic(NULL, -1, "HPET cannot be assigned an IRQ\n");
-        }
+        if (hpet_irq < 0) { panic(NULL, -1, "HPET cannot be assigned an IRQ\n"); }
 
         // Set timer comparator registers
-        uint64_t period = (*(uint64_t*)(hpet_mmio_base) >> 32) & 0xffffffff;
-        uint64_t interval = ROUND_UP(10000000000000, period); // Wait 10 milliseconds (1+E13)(counter is in femtoseconds)
-        framebuffer_printf("Timer period is %zu femtoseconds - target wait is %zu\n", period, interval);
-        uint64_t config_register = *(uint64_t*)(hpet_mmio_base + HPET_CONFIGURATION);
-        *(uint64_t*)(hpet_mmio_base + HPET_CONFIGURATION) = (config_register & ~0b10) | 1; // Enable HPET (without legacy interrupt mapping)
+        uint64_t period = (*(uint64_t volatile*)(hpet_mmio_base) >> 32) & 0xffffffff;
+        uint64_t ticks_per_second = SECOND_IN_FEMTOSECONDS / period;
+        uint64_t ticks_in_10_ms = ticks_per_second / 100;
 
-        uint64_t main_counter = *(uint64_t*)(hpet_mmio_base + 0xF0);
-        *(uint64_t*)(hpet_mmio_base + 0x148) = main_counter + interval;
+        framebuffer_printf("Timer period is %zu femptoseconds - %zu ticks in 10 ms\n", period, ticks_in_10_ms);
+        *(uint64_t volatile*)(hpet_mmio_base + 0x108) = ticks_in_10_ms; // Dont need to take existing counter value into account because we cleared it
+        *(uint64_t volatile*)(hpet_mmio_base + 0x100) = (hpet_irq << 9) | (1 << 2); // Setup comparator interrupts for the desired IRQ line
 
-        // Set timer configuration register
-        io_apic_interrupt_redirection(hpet_irq, 33);
-        framebuffer_printf("Mapped HPET irq to %d\n", hpet_irq);
-        *(uint64_t*)(hpet_mmio_base + 0x140) = (hpet_irq << 9) | (1 << 2);
+        io_apic_interrupt_redirection(hpet_irq, 33, true, false);
 
+        // Reset and enable the timer
+        *(uint64_t volatile*)(hpet_mmio_base + HPET_MAIN_COUNTER) = 0;
+        *(uint64_t volatile*)(hpet_mmio_base + HPET_CONFIGURATION) = 1;
 
-        if ((*(uint64_t*)(hpet_mmio_base + 0x140) >> 9 & 0b11111) != hpet_irq) {
-            framebuffer_printf("HPET didn't accept destination, used %d instead\n", *(uint64_t*)(hpet_mmio_base + 0x100) >> 9 & 0b11111);
-        }
     } else {
+        io_apic_interrupt_redirection(2, 33, true, false);
         pit_init();
     }
 
-    // Set timer divier to 16
+    // Set timer divier to 16 and count down from max value
     apic_io_output(APIC_TIMER_DIVIDE, 3);
-    // Reset counter
     apic_io_output(APIC_TIMER_INITIAL_COUNT, 0xffffffff);
 
     if (hpet) {
-        framebuffer_print("About to fire HPET\n");
+        extern volatile bool oneshot_triggered; // in pit.c
+        oneshot_triggered = false;
         arch_exit_critical();
-
-        extern volatile bool oneshot_triggered;
         while (!oneshot_triggered) {
             arch_pause();
         }
 
         arch_enter_critical();
-
     } else {
-        framebuffer_print("About to use legacy timer\n");
         // Enable interrupts so we can receive the timer signal
         arch_exit_critical();
         // Sleep for 10ms
@@ -308,7 +301,7 @@ void timer_init() {
     framebuffer_printf("APIC timer has %lu ticks in 10ms\n", elapsed_ticks);
 
     // Start the timer to fire every 10ms on interrupt 32
-    // Now that we know how many ticks adds up to 10ms
+    // Now that we know how many ticks occur in 10ms
     apic_io_output(APIC_LVT_TIMER, 32 | APIC_TIMER_MODE_PERIODIC);
     apic_io_output(APIC_TIMER_DIVIDE, 3);
     apic_io_output(APIC_TIMER_INITIAL_COUNT, elapsed_ticks);
@@ -340,6 +333,10 @@ void acpi_init(v_addr_t rsdp_addr) {
     find_acpi_tables();
 
     framebuffer_print("Found ACPI tables\n");
+
+    if (fadt->boot_architecture_flags & 2) {
+        framebuffer_print("PS/2 Controller Present\n");
+    }
 
     debug_printf("Creating mmio vmo @ %#p\n", (uint64_t)madt->local_apic_address);
     ir_status_t status = vm_object_create_physical(madt->local_apic_address, PAGE_SIZE, VM_MMIO_FLAGS, &local_apic_mmio_vm_object);
@@ -390,7 +387,6 @@ void acpi_init(v_addr_t rsdp_addr) {
 
     // Get this core's apic id from the mmio registers
     uint8_t bsp_apic_id = *((uint32_t*)(local_apic_mmio_base + 0x20));
-
 
     io_apics = calloc(io_apic_count, sizeof(struct io_apic_info));
 
@@ -453,11 +449,11 @@ void acpi_init(v_addr_t rsdp_addr) {
 
     framebuffer_print("Done scanning table\n");
 
-    framebuffer_printf("PIT maps to interrupt line %d\n", pit_entry_number);
-    io_apic_interrupt_redirection(pit_entry_number, 33);
+    //framebuffer_printf("PIT maps to interrupt line %d\n", pit_entry_number);
+    //io_apic_interrupt_redirection(pit_entry_number, 33);
 
     // TODO: This shouldn't be hardcoded but I wanted to test the interrupt api
-    io_apic_interrupt_redirection(1, 34);
+    io_apic_interrupt_redirection(1, 34, true, false);
 
     // Now knowing which interrupt the pit maps to, we can use it to calibrate a more precise timer
     timer_init();
