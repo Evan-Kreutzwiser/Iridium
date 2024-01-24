@@ -83,7 +83,7 @@ void exception(registers *context, char *name) {
             name, context->rip, context->error_code
         );
 
-    panic(context, 0xe, buffer);
+    panic(context, context->interrupt_number, buffer);
 }
 
 void double_fault(registers *context) {
