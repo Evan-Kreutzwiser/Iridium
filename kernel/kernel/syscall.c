@@ -2,20 +2,21 @@
 /// @brief Generic side of responding to system calls
 /// @see Architecture specfic syscall entry point
 
+#include "iridium/errors.h"
+#include "iridium/syscalls.h"
+#include "kernel/devices/framebuffer.h"
+#include "kernel/handle.h"
+#include "kernel/heap.h"
+#include "kernel/interrupt.h"
+#include "kernel/ioport.h"
+#include "kernel/memory/v_addr_region.h"
+#include "kernel/memory/vm_object.h"
+#include "kernel/process.h"
+#include "kernel/scheduler.h"
+#include "kernel/time.h"
 #include <stdint.h>
-#include <iridium/errors.h>
-#include <iridium/syscalls.h>
-#include <kernel/memory/v_addr_region.h>
-#include <kernel/memory/vm_object.h>
-#include <kernel/ioport.h>
-#include <kernel/interrupt.h>
-#include <kernel/process.h>
-#include <kernel/scheduler.h>
-#include <kernel/devices/framebuffer.h>
-#include <kernel/handle.h>
-#include <kernel/heap.h>
 
-#include <arch/debug.h>
+#include "arch/debug.h"
 
 #if __LONG_WIDTH__ < __INTPTR_WIDTH__
 #error Long is shorter than pointer width
@@ -44,6 +45,7 @@ const syscall syscall_table[] = {
     [SYSCALL_THREAD_START] = (syscall)(uintptr_t)sys_thread_start,
     [SYSCALL_YIELD] = (syscall)(uintptr_t)sys_yield,
     [SYSCALL_SLEEP_MICROSECONDS] = (syscall)(uintptr_t)sys_sleep_microseconds,
+    [SYSCALL_TIME_MICROSECONDS] = (syscall)(uintptr_t)sys_time_microseconds,
     [SYSCALL_IOPORT_CREATE] = (syscall)(uintptr_t)sys_ioport_create,
     [SYSCALL_IOPORT_SEND] = (syscall)(uintptr_t)sys_ioport_send,
     [SYSCALL_IOPORT_RECEIVE] = (syscall)(uintptr_t)sys_ioport_receive,

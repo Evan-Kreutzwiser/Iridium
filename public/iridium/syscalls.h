@@ -15,27 +15,28 @@
 #define SYSCALL_PROCESS_CREATE 7 // Create a blank new process
 #define SYSCALL_THREAD_CREATE 8 // Create a new thread
 
-#define SYSCALL_PROCESS_START 16 // Begin executing a proceess
-#define SYSCALL_THREAD_START 17 // Begin executing a thread
+#define SYSCALL_PROCESS_START 10 // Begin executing a proceess
+#define SYSCALL_THREAD_START 11 // Begin executing a thread
 
-#define SYSCALL_V_ADDR_REGION_CREATE 9
-#define SYSCALL_V_ADDR_REGION_MAP 10 // Map a virtual memory object into an address space
-#define SYSCALL_V_ADDR_REGION_DESTROY 11 // Discard a region and remove all child regions and mappings
-#define SYSCALL_VM_OBJECT_CREATE 12
+#define SYSCALL_V_ADDR_REGION_CREATE 12
+#define SYSCALL_V_ADDR_REGION_MAP 13 // Map a virtual memory object into an address space
+#define SYSCALL_V_ADDR_REGION_DESTROY 14 // Discard a region and remove all child regions and mappings
+#define SYSCALL_VM_OBJECT_CREATE 15
 
-#define SYSCALL_DEBUG_GET_FRAMEBUFFER 13
-#define SYSCALL_DEBUG_DUMP_HANDLES 14
+#define SYSCALL_DEBUG_GET_FRAMEBUFFER 16
+#define SYSCALL_DEBUG_DUMP_HANDLES 17
 
-#define SYSCALL_YIELD 15 // Yield the remaining portion of the process's timeslice and switch to the next scheduled process
-#define SYSCALL_SLEEP_MICROSECONDS 16
+#define SYSCALL_YIELD 18 // Yield the remaining portion of the process's timeslice and switch to the next scheduled process
+#define SYSCALL_SLEEP_MICROSECONDS 19
+#define SYSCALL_TIME_MICROSECONDS 20 // Report how long the system has been running in microseconds
 
-#define SYSCALL_IOPORT_CREATE 18
-#define SYSCALL_IOPORT_SEND 19
-#define SYSCALL_IOPORT_RECEIVE 20
+#define SYSCALL_IOPORT_CREATE 21
+#define SYSCALL_IOPORT_SEND 22
+#define SYSCALL_IOPORT_RECEIVE 23
 
-#define SYSCALL_INTERRUPT_CREATE 21
-#define SYSCALL_INTERRUPT_WAIT 22
-#define SYSCALL_INTERRUPT_ARM 23
+#define SYSCALL_INTERRUPT_CREATE 24
+#define SYSCALL_INTERRUPT_WAIT 25
+#define SYSCALL_INTERRUPT_ARM 26
 
 char *syscall_names[] = {
     [SYSCALL_HANDLE_DUPLICATE] = "SYSCALL_HANDLE_DUPLICATE",
@@ -54,6 +55,8 @@ char *syscall_names[] = {
     [SYSCALL_DEBUG_GET_FRAMEBUFFER] = "SYSCALL_DEBUG_GET_FRAMEBUFFER",
     [SYSCALL_DEBUG_DUMP_HANDLES] = "SYSCALL_DEBUG_DUMP_HANDLES",
     [SYSCALL_YIELD] = "SYSCALL_YIELD",
+    [SYSCALL_SLEEP_MICROSECONDS] = "SYSCALL_SLEEP_MICROSECONDS",
+    [SYSCALL_TIME_MICROSECONDS] = "SYSCALL_TIME_MICROSECONDS",
     [SYSCALL_IOPORT_CREATE] = "SYSCALL_IOPORT_CREATE",
     [SYSCALL_IOPORT_SEND] = "SYSCALL_IOPORT_SEND",
     [SYSCALL_IOPORT_RECEIVE] = "SYSCALL_IOPORT_RECEIVE",
