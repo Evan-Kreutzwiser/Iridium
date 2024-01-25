@@ -478,11 +478,6 @@ physical_page_info *pmm_page_from_p_addr(p_addr_t address) {
     return NULL;
 }
 
-/// TODO: Do I actually need this?
-physical_page_info *get_kernel_pages() {
-    return kernel_pages;
-}
-
 size_t pmm_memory_free() {
     return memory_free;
 }

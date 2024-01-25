@@ -281,9 +281,6 @@ ir_status_t arch_mmu_map_contiguous(address_space *addr_space, v_addr_t address,
 // Change the access flags for an existing mapping
 ir_status_t arch_mmu_protect(address_space *addr_space, v_addr_t address, size_t count, uint flags) {
 
-    // Check argument validity
-    // TODO: Translate v_addr_region_flags to page flags
-
     if ( !addr_space || !address ) {
         return IR_ERROR_INVALID_ARGUMENTS; // Null pointers
     }
