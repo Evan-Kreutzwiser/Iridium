@@ -15,6 +15,7 @@
 #include "kernel/process.h"
 #include "kernel/scheduler.h"
 #include "kernel/heap.h"
+#include "kernel/time.h"
 #include "kernel/arch/mmu.h"
 #include "kernel/arch/arch.h"
 #include "align.h"
@@ -319,24 +320,23 @@ void timer_init(int pit_irq) {
     apic_io_output(APIC_TIMER_INITIAL_COUNT, elapsed_ticks);
 }
 
-uint64_t timer_ticks = 0; // 100 = 1 second
 void timer_fired(struct registers* context) {
-    timer_ticks++;
+    // Fires every 10 milliseconds
 
-    if (timer_ticks % 4 == 0) {
-        //arch_enter_critical();
-        // When the task resumes, return from this function
-        struct thread *thread = this_cpu->current_thread;
-        //memcpy(&thread->context, context, sizeof(registers));
+    microseconds_since_boot += 10000;
 
-        // Something is wrong with the copying and the registers get corrupted
-        //memcpy(&thread->context, context, sizeof(struct registers));
+    //arch_enter_critical();
+    // When the task resumes, return from this function
+    struct thread *thread = this_cpu->current_thread;
+    //memcpy(&thread->context, context, sizeof(registers));
 
-        arch_save_context(&thread->context);
-        arch_set_instruction_pointer(&thread->context, (uint64_t)arch_leave_function);
+    // Something is wrong with the copying and the registers get corrupted
+    //memcpy(&thread->context, context, sizeof(struct registers));
 
-        switch_task(true);
-    }
+    arch_save_context(&thread->context);
+    arch_set_instruction_pointer(&thread->context, (uint64_t)arch_leave_function);
+
+    switch_task(true);
 }
 
 void acpi_init(v_addr_t rsdp_addr) {

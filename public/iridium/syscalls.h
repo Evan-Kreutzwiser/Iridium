@@ -27,6 +27,7 @@
 #define SYSCALL_DEBUG_DUMP_HANDLES 14
 
 #define SYSCALL_YIELD 15 // Yield the remaining portion of the process's timeslice and switch to the next scheduled process
+#define SYSCALL_SLEEP_MICROSECONDS 16
 
 #define SYSCALL_IOPORT_CREATE 18
 #define SYSCALL_IOPORT_SEND 19

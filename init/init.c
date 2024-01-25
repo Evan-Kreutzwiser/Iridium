@@ -292,6 +292,53 @@ void thread_entry() {
     }
 }
 
+void sleeping_thread(void) {
+
+    int r = 255;
+    int g = 0;
+    int b = 0;
+    int changing_color = 0;
+    while (1) {
+        int position = pitch * 228 + 664 * bpp/8;
+        for (int i = 0; i < 64; i++, position += pitch) {
+            for (int j = 0; j < 64; j++) {
+                framebuffer[position + (j * (bpp / 8))] = r;
+                framebuffer[position + (j * (bpp / 8)) + 1] = g;
+                framebuffer[position + (j * (bpp / 8)) + 2] = b;
+            }
+        }
+        // Wait 10 milliseconds
+        syscall_1(SYSCALL_SLEEP_MICROSECONDS, 10000);
+
+        if (changing_color == 0) {
+            r--;
+            g++;
+            if (g == 255) {
+                changing_color = 1;
+                // Wait 4 seconds
+                syscall_1(SYSCALL_SLEEP_MICROSECONDS, 4000000);
+            }
+        } else if (changing_color == 1) {
+            g--;
+            b++;
+            if (b == 255) {
+                changing_color = 2;
+                // Wait 4 seconds
+                syscall_1(SYSCALL_SLEEP_MICROSECONDS, 4000000);
+            }
+        } else if (changing_color == 2) {
+            b--;
+            r++;
+            if (r == 255) {
+                changing_color = 0;
+                // Wait 4 seconds
+                syscall_1(SYSCALL_SLEEP_MICROSECONDS, 4000000);
+            }
+        }
+    }
+
+}
+
 void _start(void) {
     sys_print("--------\nHello from the init process!\n--------\n");
 
@@ -312,6 +359,8 @@ void _start(void) {
             spawn_thread(thread_entry);
 
             spawn_thread(keyboard_thread);
+
+            spawn_thread(sleeping_thread);
 
             int x = 0;
             while (1) {

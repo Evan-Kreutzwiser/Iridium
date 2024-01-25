@@ -53,6 +53,9 @@ struct thread {
     bool is_exiting;
 
     struct registers context;
+    /// If the thread is sleeping, this is the time since boot
+    /// in microseconds when it will wake up
+    size_t sleeping_until;
 
     int thread_id;
 };

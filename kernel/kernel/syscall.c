@@ -43,6 +43,7 @@ const syscall syscall_table[] = {
     [SYSCALL_DEBUG_DUMP_HANDLES] = (syscall)(uintptr_t)sys_handle_dump,
     [SYSCALL_THREAD_START] = (syscall)(uintptr_t)sys_thread_start,
     [SYSCALL_YIELD] = (syscall)(uintptr_t)sys_yield,
+    [SYSCALL_SLEEP_MICROSECONDS] = (syscall)(uintptr_t)sys_sleep_microseconds,
     [SYSCALL_IOPORT_CREATE] = (syscall)(uintptr_t)sys_ioport_create,
     [SYSCALL_IOPORT_SEND] = (syscall)(uintptr_t)sys_ioport_send,
     [SYSCALL_IOPORT_RECEIVE] = (syscall)(uintptr_t)sys_ioport_receive,

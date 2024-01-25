@@ -125,11 +125,13 @@ void object_set_signals(object *obj, ir_signal_t signals) {
 /// @brief Blocking syscall that waits until an object asserts a signal
 /// @param object_handle Object whose signals will be listened to
 /// @param target_signals Bitmap of signals to wait for
-/// @param deadline When to stop waiting
+/// @param timeout_microseconds When to stop waiting.
+///                             0 causes the current state to return immediately, and -1
+///                             means never time out.
 /// @param observed_signals Upon signal assertion, is set to contain the object's signals
 /// @return On signal assertion, returns `IR_OK` and the complete state of the object is
 ///         found in observed signals. If deadline is reached first, returns `IR_ERROR_TIMED_OUT`
-ir_status_t sys_object_wait(ir_handle_t object_handle, ir_signal_t target_signals, long deadline, ir_signal_t *observed_signals) {
+ir_status_t sys_object_wait(ir_handle_t object_handle, ir_signal_t target_signals, size_t timeout_microseconds, ir_signal_t *observed_signals) {
     if (!arch_validate_user_pointer(observed_signals)) {
         return IR_ERROR_INVALID_ARGUMENTS;
     }
@@ -155,23 +157,26 @@ ir_status_t sys_object_wait(ir_handle_t object_handle, ir_signal_t target_signal
         return IR_OK;
     }
 
-    struct signal_listener* listener = malloc(sizeof(struct signal_listener));
-    if (!listener) {
+    if (timeout_microseconds > 0) {
+        struct signal_listener* listener = malloc(sizeof(struct signal_listener));
+        if (!listener) {
+            spinlock_release(object->lock);
+            return IR_ERROR_NO_MEMORY;
+        }
+
         spinlock_release(object->lock);
-        return IR_ERROR_NO_MEMORY;
+
+        // Block the task until one of the signals are asserted
+        scheduler_block_listener_and_switch(listener);
+        // This is not reached until either the signal is raised or the deadline is reached.
+        *observed_signals = listener->observed_signals;
+        // If any of the target signals were raised
+        if (listener->observed_signals & target_signals) {
+            return IR_OK;
+        }
     }
-
-    spinlock_release(object->lock);
-
-    // Block the task until one of the signals are asserted
-    scheduler_block_listener_and_switch(listener);
-
-    // This is not reached until either the signal is raised or the deadline is reached.
-    *observed_signals = listener->observed_signals;
-
-    // If any of the target signals were raised
-    if (listener->observed_signals & target_signals) {
-        return IR_OK;
+    else {
+        *observed_signals = object->signals;
     }
 
     return IR_ERROR_TIMED_OUT;

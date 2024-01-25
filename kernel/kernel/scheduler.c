@@ -8,6 +8,7 @@
 #include "kernel/arch/arch.h"
 #include "kernel/arch/mmu.h"
 #include "kernel/string.h"
+#include "kernel/time.h"
 #include "arch/registers.h"
 #include "iridium/types.h"
 #include "stdbool.h"
@@ -20,8 +21,10 @@ linked_list run_queue;
 
 /// Every thread waiting on an object for signal changes.
 /// Contains signal listeners rather than the thread itself.
-/// TODO: sort in order of deadline
 linked_list waiting_for_signals;
+
+/// Threads waiting for time to pass
+linked_list sleeping_threads;
 
 /// SYSCALL_YIELD
 ir_status_t sys_yield() {
@@ -51,14 +54,21 @@ void switch_task(bool reschedule) {
 
     // Before switching tasks, see if there are any threads listening for signals whose deadlines have passed
     struct signal_listener *listener;
-    uint64_t current_time = -1; // TODO: Deadline not supported yet, due to a lack of time tracking.
-    while (linked_list_get(&waiting_for_signals, 0, (void*)&listener) == IR_OK && listener->deadline < current_time) {
+    while (linked_list_get(&waiting_for_signals, 0, (void*)&listener) == IR_OK && listener->deadline < microseconds_since_boot) {
         // TODO: Lock for multiprocessing environment
         linked_list_remove(&waiting_for_signals, 0, NULL);
         scheduler_unblock_listener(listener);
     }
 
-    struct thread *thread = this_cpu->current_thread;
+    // And wake up sleeping threads who have waited long enough
+    struct thread *thread;
+    while (linked_list_get(&sleeping_threads, 0, (void*)&thread) == IR_OK && thread->sleeping_until < microseconds_since_boot) {
+        // TODO: Lock for multiprocessing environment
+        linked_list_remove(&sleeping_threads, 0, NULL);
+        schedule_thread(thread);
+    }
+
+    thread = this_cpu->current_thread;
     struct thread *next;
     ir_status_t status = linked_list_remove(&run_queue, 0, (void**)&next);
 
@@ -124,4 +134,27 @@ void scheduler_unblock_listener(struct signal_listener *listener) {
     spinlock_release(listener->target->lock);
 
     linked_list_add(&run_queue, listener->thread);
+}
+
+/// @brief Put a thread to sleep and take it out of the run queue for a specific amount of time
+/// @param thread A thread that is not currently in a run queue
+/// @param microseconds How long the thread should sleep.
+void scheduler_sleep_microseconds(struct thread *thread, size_t microseconds) {
+    thread->sleeping_until = microseconds_since_boot + microseconds;
+    linked_list_add_sorted(&sleeping_threads, NULL, thread);
+}
+
+/// @brief Put the current thread to sleep for a length of time
+/// @param microseconds
+/// @return `IR_OK`
+ir_status_t sys_sleep_microseconds(size_t microseconds) {
+    struct thread *thread = this_cpu->current_thread;
+    scheduler_sleep_microseconds(thread, microseconds);
+
+    arch_save_context(&thread->context);
+    arch_set_instruction_pointer(&thread->context, (uintptr_t)arch_leave_function);
+
+    switch_task(false);
+
+    return IR_OK;
 }

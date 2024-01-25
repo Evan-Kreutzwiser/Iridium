@@ -21,7 +21,7 @@ iso: kernel init
 	grub-mkrescue grub/ -o grub.img
 
 emu: iso
-	qemu-system-x86_64 -hda grub.img -serial file:serial.txt -no-reboot -m 1G -s -no-shutdown -d int
+	qemu-system-x86_64 -hda grub.img -serial file:serial.txt -no-reboot -m 1G -s -no-shutdown
 
 docs:
 	doxygen

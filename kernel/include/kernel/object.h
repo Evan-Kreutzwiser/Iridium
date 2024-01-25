@@ -41,7 +41,7 @@ void object_set_signals(object *obj, ir_signal_t signals);
 /// @param observed_signals Upon signal assertion, is set to contain the object's signals
 /// @return On signal assertion, returns `IR_OK` and the complete state of the object is
 ///         found in observed signals. If deadline is reached first, returns `IR_ERROR_TIMED_OUT`
-ir_status_t sys_object_wait(ir_handle_t object_handle, ir_signal_t target_signals, long deadline, ir_signal_t *observed_signals);
+ir_status_t sys_object_wait(ir_handle_t object_handle, ir_signal_t target_signals, size_t timeout_microseconds, ir_signal_t *observed_signals);
 
 void object_decrement_references(object* obj);
 
