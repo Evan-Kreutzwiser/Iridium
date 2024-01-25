@@ -195,10 +195,36 @@ multiboot_trampoline_64:
     xor     %edx, %edx
     wrmsr
 
-    // Mask all interrupts from the legacy PIC, since we want to use the APICs
-    mov $0xff, %al
-    out %al, $0xa1
-    out %al, $0x21
+    // Fully setup the legacy PIC, even if just emulated, to ensure the interrupt masking is applying properly
+    #define PIC_MASTER_CMD $0x20
+    #define PIC_MASTER_DATA $0x21
+    #define PIC_SLAVE_CMD $0xA0
+    #define PIC_SLAVE_DATA $0xA1
+    mov $0x11, %al
+    out  %al, PIC_MASTER_CMD
+    out  %al, PIC_SLAVE_CMD
+
+    // Map interrupts to the range 35-42, which we will ignore
+    // in the event of spurious interrupts
+    // (33 and 34 are being used already. TODO: Dynamically assign the keyboard interrupt)
+    mov $35, %al
+    out  %al, PIC_MASTER_DATA
+    out  %al, PIC_SLAVE_DATA
+
+    mov $0x4, %al
+    out %al, PIC_MASTER_DATA
+    mov $0x2, %al
+    out %al, PIC_SLAVE_DATA
+
+    mov $0x01, %al
+    out %al, PIC_MASTER_DATA
+    out %al, PIC_SLAVE_DATA
+
+    // Mask all interrupts
+    mov $0xFF, %al
+    out %al, PIC_MASTER_DATA
+    out %al, PIC_SLAVE_DATA
+
 
     // Set a null stack trace for debugging
     xor     %rbp, %rbp

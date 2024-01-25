@@ -1,28 +1,35 @@
 /// @file arch/x86_64/acpi.c
 /// @brief Managing multiprocessor systems, and APIC interrupt setup
 
-#include <arch/x86_64/acpi.h>
-#include <arch/x86_64/msr.h>
-#include <arch/x86_64/pit.h>
-#include <arch/x86_64/idt.h>
-#include <arch/registers.h>
-#include <kernel/main.h>
-#include <kernel/string.h>
-#include <kernel/devices/framebuffer.h>
-#include <kernel/memory/physical_map.h>
-#include <kernel/memory/v_addr_region.h>
-#include <kernel/memory/vm_object.h>
-#include <kernel/process.h>
-#include <kernel/scheduler.h>
-#include <kernel/heap.h>
-#include <kernel/arch/mmu.h>
-#include <kernel/arch/arch.h>
-#include <align.h>
+#include "arch/x86_64/acpi.h"
+#include "arch/x86_64/asm.h"
+#include "arch/x86_64/idt.h"
+#include "arch/x86_64/msr.h"
+#include "arch/registers.h"
+#include "kernel/main.h"
+#include "kernel/string.h"
+#include "kernel/devices/framebuffer.h"
+#include "kernel/memory/physical_map.h"
+#include "kernel/memory/v_addr_region.h"
+#include "kernel/memory/vm_object.h"
+#include "kernel/process.h"
+#include "kernel/scheduler.h"
+#include "kernel/heap.h"
+#include "kernel/arch/mmu.h"
+#include "kernel/arch/arch.h"
+#include "align.h"
 #include <stddef.h>
 #include <stdbool.h>
 #include <cpuid.h>
 
-#include <arch/debug.h>
+#include "arch/debug.h"
+
+/// Frequency of the PIT in Hz. This number is divided to generate the target frequency
+#define PIT_BASE_FREQUENCY 1193182
+#define PIT_CHANNEL_0_PORT 0x40
+#define PIT_CHANNEL_1_PORT 0x41
+#define PIT_CHANNEL_2_PORT 0x42
+#define PIT_COMMAND_PORT 0x43
 
 // APIC register offsets
 #define APIC_LAPIC_ID 0x20
@@ -87,6 +94,8 @@ static struct v_addr_region* hpet_mmio_v_addr_region;
 static v_addr_t io_apic_mmio_address;
 static struct io_apic_info *io_apics;
 static int io_apic_count;
+
+volatile bool oneshot_triggered = false; // Used during timer calibration
 
 static void record_acpi_table_address(const struct acpi_header* table) {
     if (strncmp(table->signature, "APIC", 4) == 0) {
@@ -209,7 +218,7 @@ void apic_send_eoi() {
     apic_io_output(APIC_EOI, 0);
 }
 
-// Enabled the APIC interrupt controller
+/// Enabled the APIC interrupt controller
 void apic_init() {
     // TODO: Map mmio as strong uncachable?
 
@@ -223,22 +232,32 @@ void apic_init() {
     apic_io_output(APIC_SPURIOUS_INT_VECTOR, apic_io_input(APIC_SPURIOUS_INT_VECTOR) | 0x1ff);
 }
 
-// Initialize the cpu's local apic timer
-void timer_init() {
+/// Initialize the cpu's local apic timer
+void timer_init(int pit_irq) {
+
+    // Barebones irq handler that sets the oneshot fired variable
+    extern char timer_calibration_irq;
+    idt_set_entry(33, 0x8, (uintptr_t)&timer_calibration_irq, IDT_GATE_INTERRUPT, 0);
 
     if (hpet) {
+        // If there is a PIT present (Like in Bochs or emulated by the hardware), drop it
+        // into a state where it waits for more input forever and can't accidentally fire
+        // (Caused an issue where interrupt 0 would fire even with the PIC and IO APIC lines all masked)
+        out_port_b(PIT_COMMAND_PORT, 3 << 4);
+
         int hpet_irq = -1;
-        framebuffer_print("Setting up HPET\n");
-        extern char timer_calibration_irq;
-        idt_set_entry(33, 0x8, (uintptr_t)&timer_calibration_irq, IDT_GATE_INTERRUPT, 0); // Sets the oneshot fired variable
-        vm_object_create_physical(hpet->base_address.address, PAGE_SIZE, VM_MMIO_FLAGS, &hpet_mmio_vm_object);
-        v_addr_region_map_vm_object(kernel_region, V_ADDR_REGION_DISABLE_CACHE | V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE, hpet_mmio_vm_object, &hpet_mmio_v_addr_region, 0, &hpet_mmio_base);
+        debug_printf("Setting up HPET\n");
+
+        ir_status_t status = vm_object_create_physical(hpet->base_address.address, PAGE_SIZE, VM_MMIO_FLAGS, &hpet_mmio_vm_object);
+        if (status) { panic(NULL, status, "Error allocating HPET MMIO"); }
+        status = v_addr_region_map_vm_object(kernel_region, V_ADDR_REGION_DISABLE_CACHE | V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE, hpet_mmio_vm_object, &hpet_mmio_v_addr_region, 0, &hpet_mmio_base);
+        if (status) { panic(NULL, status, "Error mapping HPET MMIO"); }
 
         // Disable HPET (until setup is done) and turn off legacy mapping
         *(uint64_t volatile*)(hpet_mmio_base + HPET_CONFIGURATION) = 0;
 
         // Get a bitmap of every irq line the first comparator supports
-        framebuffer_print("Supported IRQ #s:");
+        framebuffer_print("Supported HPET IRQ #s:");
         uint32_t supported_interrupts = *(uint64_t volatile*)(hpet_mmio_base + 0x140) >> 32;
         for (int i = 0; i < 31; i++) {
             if (supported_interrupts & 1) {
@@ -256,7 +275,6 @@ void timer_init() {
         uint64_t ticks_per_second = SECOND_IN_FEMTOSECONDS / period;
         uint64_t ticks_in_10_ms = ticks_per_second / 100;
 
-        framebuffer_printf("Timer period is %zu femptoseconds - %zu ticks in 10 ms\n", period, ticks_in_10_ms);
         *(uint64_t volatile*)(hpet_mmio_base + 0x108) = ticks_in_10_ms; // Dont need to take existing counter value into account because we cleared it
         *(uint64_t volatile*)(hpet_mmio_base + 0x100) = (hpet_irq << 9) | (1 << 2); // Setup comparator interrupts for the desired IRQ line
 
@@ -267,32 +285,26 @@ void timer_init() {
         *(uint64_t volatile*)(hpet_mmio_base + HPET_CONFIGURATION) = 1;
 
     } else {
-        io_apic_interrupt_redirection(2, 33, true, false);
-        pit_init();
+        io_apic_interrupt_redirection(pit_irq, 33, true, false);
+
+        out_port_b(PIT_COMMAND_PORT, 3 << 4);
+
+        int divisor = (PIT_BASE_FREQUENCY / 100);
+        out_port_b(PIT_CHANNEL_0_PORT, divisor & 0xff);
+        out_port_b(PIT_CHANNEL_0_PORT, (divisor >> 8) & 0xff);
     }
 
     // Set timer divier to 16 and count down from max value
     apic_io_output(APIC_TIMER_DIVIDE, 3);
     apic_io_output(APIC_TIMER_INITIAL_COUNT, 0xffffffff);
 
-    if (hpet) {
-        extern volatile bool oneshot_triggered; // in pit.c
-        oneshot_triggered = false;
-        arch_exit_critical();
-        while (!oneshot_triggered) {
-            arch_pause();
-        }
-
-        arch_enter_critical();
-    } else {
-        // Enable interrupts so we can receive the timer signal
-        arch_exit_critical();
-        // Sleep for 10ms
-        pit_one_shot(10);
-        // Disable interrupts until we're executing processes to avoid the
-        // timer going off while we're setting up the kernek
-        arch_enter_critical();
+    oneshot_triggered = false;
+    arch_exit_critical();
+    while (!oneshot_triggered) {
+        arch_pause();
     }
+
+    arch_enter_critical();
 
     // Measure how many ticks passed during that sleep
     apic_io_output(APIC_LVT_TIMER, APIC_LVT_INT_MASK);
@@ -422,7 +434,12 @@ void acpi_init(v_addr_t rsdp_addr) {
             io_apics[io_apic_count].address = io_apic_mmio_address;
             io_apics[io_apic_count].base = io_apic->global_interrupt_base;
             // Bits 16-23 of the io apic's version register contain the number of interrupt redirection entries
-            io_apics[io_apic_count].entry_count = (io_apic_read(io_apics[io_apic_count].address, IO_APIC_VERSION_REGISTER) >> 16) & 0Xff;
+            io_apics[io_apic_count].entry_count = ((io_apic_read(io_apics[io_apic_count].address, IO_APIC_VERSION_REGISTER) >> 16) & 0Xff) + 1;
+            // Mask every irq line, just in case firmware left any active
+            for (uint i = 0; i < io_apics[io_apic_count].entry_count; i++) {
+                io_apic_write(io_apic_mmio_address, i * 2 + IO_APIC_REDIRECTION_TABLE_BASE, 1 << 16);
+            }
+
             debug_printf("Found IO APIC at physical address %#p, manages %d lines starting at %d\n", io_apic->address, io_apics[io_apic_count].entry_count, io_apics[io_apic_count].base);
             framebuffer_printf("Found IO APIC at physical address %#p, manages %d lines starting at %d\n", io_apic->address, io_apics[io_apic_count].entry_count, io_apics[io_apic_count].base);
             io_apic_count++;
@@ -456,7 +473,7 @@ void acpi_init(v_addr_t rsdp_addr) {
     io_apic_interrupt_redirection(1, 34, true, false);
 
     // Now knowing which interrupt the pit maps to, we can use it to calibrate a more precise timer
-    timer_init();
+    timer_init(pit_entry_number);
 
     framebuffer_print("Timer setup complete\n");
 }
