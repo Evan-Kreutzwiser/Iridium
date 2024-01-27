@@ -135,8 +135,7 @@ void framebuffer_print(const char* string) {
         }
         else {
             // Find the character in the PSF glyph array
-            char* glyph = (char*)((uintptr_t)font + font->header_size + (font->bytes_per_glyph * (*string)));
-
+            char* glyph = (char*)((uintptr_t)font + font->header_size + (font->bytes_per_glyph * (unsigned char)(*string)));
             int start_x = cursor_x * 8;
             int start_y = cursor_y * 16;
             // Every row of the glyph is a byte, and each bit in the byte represents a pixel

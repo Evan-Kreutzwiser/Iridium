@@ -9,9 +9,10 @@
 #include "kernel/arch/mmu.h"
 #include "kernel/string.h"
 #include "kernel/time.h"
+#include "kernel/main.h"
 #include "arch/registers.h"
 #include "iridium/types.h"
-#include "stdbool.h"
+#include <stdbool.h>
 
 #include "arch/debug.h"
 
@@ -72,10 +73,6 @@ void switch_task(bool reschedule) {
     struct thread *next;
     ir_status_t status = linked_list_remove(&run_queue, 0, (void**)&next);
 
-    if (!thread) {
-        debug_print("No thread\n");
-    }
-
     // Retrieve and run the next thread
     if (status == IR_OK) {
         struct process *process = (struct process*)next->object.parent;
@@ -109,6 +106,12 @@ void switch_task(bool reschedule) {
 }
 
 void schedule_thread(struct thread *thread) {
+    if (!thread) {
+        debug_printf("Scheduled a NULL pointer!!\n");
+        struct registers context;
+        arch_save_context(&context);
+        panic(&context, -1, "Scheduling NULL task\n");
+    }
     linked_list_add(&run_queue, thread);
 }
 
@@ -142,6 +145,8 @@ void scheduler_unblock_listener(struct signal_listener *listener) {
 void scheduler_sleep_microseconds(struct thread *thread, size_t microseconds) {
     thread->sleeping_until = microseconds_since_boot + microseconds;
     linked_list_add_sorted(&sleeping_threads, NULL, thread);
+
+    switch_task(false);
 }
 
 /// @brief Put the current thread to sleep for a length of time
@@ -149,12 +154,11 @@ void scheduler_sleep_microseconds(struct thread *thread, size_t microseconds) {
 /// @return `IR_OK`
 ir_status_t sys_sleep_microseconds(size_t microseconds) {
     struct thread *thread = this_cpu->current_thread;
-    scheduler_sleep_microseconds(thread, microseconds);
 
     arch_save_context(&thread->context);
     arch_set_instruction_pointer(&thread->context, (uintptr_t)arch_leave_function);
 
-    switch_task(false);
+    scheduler_sleep_microseconds(thread, microseconds);
 
     return IR_OK;
 }

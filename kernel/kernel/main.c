@@ -140,12 +140,17 @@ void panic(struct registers *context, int error_code, char *message) {
     framebuffer_printf("Iridium has encountered an unrecoverable error\n\n");
     framebuffer_print(message);
 
-    if (context) {
-        framebuffer_print("\nRegister content:\n");
-        arch_print_context_dump(context);
-        framebuffer_print("\nCall stack:\n");
-        arch_print_stack_trace(context);
+    // Kernel space panics aren't required to send context, but the
+    // stack trace is helpful for debugging so we save it ourselves
+    struct registers current_context;
+    if (!context) {
+        arch_save_context(&current_context);
+        context = &current_context;
     }
+    framebuffer_print("\nRegister content:\n");
+    arch_print_context_dump(context);
+    framebuffer_print("\nCall stack:\n");
+    arch_print_stack_trace(context);
 
     // Halt the cpu
     arch_enter_critical();
