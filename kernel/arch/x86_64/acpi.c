@@ -204,6 +204,32 @@ void io_apic_interrupt_redirection(int interrupt, int gsi, bool active_high, boo
     framebuffer_printf("Set redir entry %d to %#x, %#x\n", interrupt, io_apic_read(info->address, io_offset), io_apic_read(info->address, io_offset+1));
 }
 
+/// Add an interrupt handler to the platform's interrupt table
+void arch_interrupt_set(int vector, int irq) {
+    io_apic_interrupt_redirection(irq, vector, true, false);
+}
+
+void arch_interrupt_remove(int irq) {
+    struct io_apic_info *info = NULL;
+    for (int i = 0; i < io_apic_count; i++) {
+        if (io_apics[i].base <= (uint)irq && io_apics[i].base + io_apics[i].entry_count >= (uint)irq) {
+            info = &io_apics[i];
+            break;
+        }
+    }
+
+    if (!info) {
+        debug_printf("Could not redirect interrupt %d - no io apic manages that line\n", irq);
+        framebuffer_printf("Could not redirect interrupt %d - no io apic manages that line\n", irq);
+        return;
+    }
+
+    int io_offset = (irq - info->base) * 2 + IO_APIC_REDIRECTION_TABLE_BASE;
+
+    // Mask the interrupt line
+    io_apic_write(info->address, io_offset, (1 << 16));
+}
+
 /// Read a value from the apic's mmio registers
 static inline long apic_io_input(int register_offset) {
     return *(volatile int*)(local_apic_mmio_base + register_offset);

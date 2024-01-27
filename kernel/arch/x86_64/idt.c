@@ -319,14 +319,3 @@ void idt_init() {
     // Don't let users try to override the spurios interrupt vector
     interrupt_reserve(0xff);
 }
-
-/// Add an interrupt handler to the platform's interrupt table
-void arch_interrupt_set(int vector, void *function) {
-    // Interrupt set to only be triggered by hardware interrupts
-    idt_set_entry(vector, 0x8, (uintptr_t)function, IDT_GATE_INTERRUPT, 0);
-}
-
-/// Remove an interrupt from the interrupt table
-void arch_interrupt_remove(int vector) {
-    memset(&_idt.entries[vector], 0, sizeof(struct idt_entry));
-}

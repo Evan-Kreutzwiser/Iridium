@@ -24,10 +24,11 @@ struct interrupt {
     linked_list queue;
     /// Index into the platform's interrupt table
     int vector;
+    int irq_line;
     bool armed;
 };
 
-ir_status_t interrupt_create(int vector, struct interrupt **out);
+ir_status_t interrupt_create(int vector, int irq, struct interrupt **out);
 /// @brief Reserve interrupt vectors for the kernel, such that processes cant use them
 ir_status_t interrupt_reserve(int vector);
 
@@ -38,7 +39,7 @@ ir_status_t interrupt_arm(struct interrupt *interrupt);
 
 void interrupt_cleanup(struct interrupt *interrupt);
 
-ir_status_t sys_interrupt_create(int vector, ir_handle_t *out);
+ir_status_t sys_interrupt_create(long vector, long irq, ir_handle_t *out);
 ir_status_t sys_interrupt_wait(ir_handle_t interrupt_handle);
 ir_status_t sys_interrupt_arm(ir_handle_t interrupt_handle);
 

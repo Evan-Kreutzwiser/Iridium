@@ -32,9 +32,9 @@ void arch_enter_critical();
 void arch_exit_critical();
 
 /// Add an interrupt handler to the platform's interrupt table
-void arch_interrupt_set(int vector, void *function);
+void arch_interrupt_set(int vector, int irq);
 /// Remove an interrupt from the interrupt table
-void arch_interrupt_remove(int vector);
+void arch_interrupt_remove(int irq);
 
 /// Initialize a new thread's context with some basic register values
 /// required to enter usermode and execute code

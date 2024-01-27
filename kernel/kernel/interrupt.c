@@ -5,6 +5,7 @@
 #include "kernel/scheduler.h"
 #include "kernel/handle.h"
 #include "kernel/heap.h"
+#include "kernel/time.h"
 #include "iridium/types.h"
 #include "iridium/errors.h"
 #include "arch/registers.h"
@@ -21,20 +22,25 @@ void interrupt_dispatch(int number) {
         return;
     }
 
-    if (!interrupt->armed || !interrupt->thread) {
-        debug_printf("WARNING: No thread listening for interrupt %d\n", number);
-        return;
+    if (interrupt->armed) {
+        if (!interrupt->thread) {
+            debug_printf("WARNING: No thread listening for armed interrupt %d\n", number);
+            linked_list_add(&interrupt->queue, (void*)microseconds_since_boot);
+            return;
+        }
+
+        struct thread* thread = interrupt->thread;
+        interrupt->thread = NULL;
+        interrupt->armed = false;
+
+        // TODO: Place at the begining of the queue so the interrupt is handled faster
+        schedule_thread(thread);
+    } else {
+        debug_printf("Interrupt fired but not armed, ignoring\n");
     }
-
-    struct thread* thread = interrupt->thread;
-    interrupt->thread = NULL;
-    interrupt->armed = false;
-
-    // TODO: Place at the begining of the queue so the interrupt is handled faster
-    schedule_thread(thread);
 }
 
-ir_status_t interrupt_create(int vector, struct interrupt **out) {
+ir_status_t interrupt_create(int vector, int irq, struct interrupt **out) {
 
     if (interrupts[vector]) {
         debug_printf("Failed to register interrupt %d, already points to %#p\n", vector, interrupts[vector]);
@@ -46,7 +52,7 @@ ir_status_t interrupt_create(int vector, struct interrupt **out) {
 
     obj->object.type = OBJECT_TYPE_INTERRUPT;
 
-    // Dispatch already exists for most vectors
+    arch_interrupt_set(vector, irq);
 
     *out = obj;
     return IR_OK;
@@ -71,13 +77,20 @@ ir_status_t interrupt_reserve(int vector) {
 void interrupt_cleanup(struct interrupt *interrupt) {
     // arch_interrupt_remove(interrupt->vector);
     int vector = interrupt->vector;
-    arch_interrupt_remove(interrupt->vector);
+    arch_interrupt_remove(interrupt->irq_line);
     interrupts[vector] = NULL;
     // There shouldn't be any left over signal listeners if this is being garbage collected
     free(interrupt);
 }
 
 ir_status_t interrupt_wait(struct interrupt *interrupt) {
+
+    // If an interrupt was waiting in the queue return immediately
+    size_t timestamp;
+    if (linked_list_remove(&interrupt->queue, 0, (void*)&timestamp) == IR_OK) {
+        debug_print("Handling interrupt from queue\n");
+        return IR_OK;
+    }
 
     interrupt->thread = this_cpu->current_thread;
     interrupt->armed = true;
@@ -92,11 +105,11 @@ ir_status_t interrupt_wait(struct interrupt *interrupt) {
     return IR_OK;
 }
 
-ir_status_t sys_interrupt_create(int vector, ir_handle_t *out) {
+ir_status_t sys_interrupt_create(long vector, long irq, ir_handle_t *out) {
     struct process* process = (struct process*)this_cpu->current_thread->object.parent;
 
     struct interrupt* interrupt;
-    ir_status_t status = interrupt_create(vector, &interrupt);
+    ir_status_t status = interrupt_create(vector, irq, &interrupt);
     if (status != IR_OK)
         return status;
 
@@ -147,5 +160,25 @@ ir_status_t sys_interrupt_arm(ir_handle_t interrupt_handle) {
     }
 
     interrupt->armed = true;
+    return IR_OK;
+}
+
+// Ignore interrupts until re armed or waited on
+ir_status_t sys_interrupt_disarm(ir_handle_t interrupt_handle) {
+    struct process* process = (struct process*)this_cpu->current_thread->object.parent;
+
+    spinlock_aquire(process->handle_table_lock);
+    struct handle* handle;
+    ir_status_t status = linked_list_find(&process->handle_table, (void*)interrupt_handle, handle_by_id, NULL, (void**)&handle);
+    struct interrupt* interrupt = (struct interrupt*)handle->object;
+    spinlock_release(process->handle_table_lock);
+    if (status) {
+        return IR_ERROR_BAD_HANDLE;
+    }
+    if (interrupt->object.type != OBJECT_TYPE_INTERRUPT) {
+        return IR_ERROR_WRONG_TYPE;
+    }
+
+    interrupt->armed = false;
     return IR_OK;
 }
