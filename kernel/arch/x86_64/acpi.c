@@ -325,16 +325,9 @@ void timer_fired(struct registers* context) {
 
     microseconds_since_boot += 10000;
 
-    //arch_enter_critical();
-    // When the task resumes, return from this function
     struct thread *thread = this_cpu->current_thread;
-    //memcpy(&thread->context, context, sizeof(registers));
-
-    // Something is wrong with the copying and the registers get corrupted
-    //memcpy(&thread->context, context, sizeof(struct registers));
-
-    arch_save_context(&thread->context);
-    arch_set_instruction_pointer(&thread->context, (uint64_t)arch_leave_function);
+    // When the task resumes, return directly into the interrupted context rather than unwinding the stack
+    memcpy(&thread->context, context, sizeof(struct registers));
 
     switch_task(true);
 }

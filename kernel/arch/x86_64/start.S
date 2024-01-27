@@ -247,19 +247,19 @@ arch_enter_context:
     cli // Interrupts will be reenabled upon iret from the thread's rflags
     movq 0x8(%rdi), %rbx
     movq 0x10(%rdi), %rcx
-    movq 0x20(%rdi), %rdx
-    movq 0x28(%rdi), %rsi
+    movq 0x18(%rdi), %rdx
+    movq 0x20(%rdi), %rsi
     // rdi set last
-    movq 0x38(%rdi), %rbp
+    movq 0x30(%rdi), %rbp
 
-    movq 0x40(%rdi), %r8
-    movq 0x48(%rdi), %r9
-    movq 0x50(%rdi), %r10
-    movq 0x58(%rdi), %r11
-    movq 0x60(%rdi), %r12
-    movq 0x68(%rdi), %r13
-    movq 0x70(%rdi), %r14
-    movq 0x78(%rdi), %r15
+    movq 0x38(%rdi), %r8
+    movq 0x40(%rdi), %r9
+    movq 0x48(%rdi), %r10
+    movq 0x50(%rdi), %r11
+    movq 0x58(%rdi), %r12
+    movq 0x60(%rdi), %r13
+    movq 0x68(%rdi), %r14
+    movq 0x70(%rdi), %r15
 
     // Data segments should match ss
     movq 0xa8(%rdi), %rax
@@ -275,7 +275,7 @@ arch_enter_context:
 
     // rax and rdi have to be restored last since they're used to restore other registers
     movq (%rdi), %rax
-    movq 0x28(%rdi), %rdi
+    movq 0x20(%rdi), %rdi
 
     iretq
 
@@ -287,37 +287,37 @@ arch_save_context:
     movq %rax, (%rdi)
     movq %rbx, 0x8(%rdi)
     movq %rcx, 0x10(%rdi)
-    movq %rdx, 0x20(%rdi)
+    movq %rdx, 0x18(%rdi)
+    movq %rdi, 0x20(%rdi) // Contains pointer to where context is being saved
     movq %rsi, 0x28(%rdi)
-    // rdi set last
-    movq %rbp, 0x38(%rdi)
+    movq %rbp, 0x30(%rdi)
 
-    movq %r8, 0x40(%rdi)
-    movq %r9, 0x48(%rdi)
-    movq %r10, 0x50(%rdi)
-    movq %r11, 0x58(%rdi)
-    movq %r12, 0x60(%rdi)
-    movq %r13, 0x68(%rdi)
-    movq %r14, 0x70(%rdi)
-    movq %r15, 0x78(%rdi)
+    movq %r8, 0x38(%rdi)
+    movq %r9, 0x40(%rdi)
+    movq %r10, 0x48(%rdi)
+    movq %r11, 0x50(%rdi)
+    movq %r12, 0x58(%rdi)
+    movq %r13, 0x60(%rdi)
+    movq %r14, 0x68(%rdi)
+    movq %r15, 0x70(%rdi)
 
-    // All data segments are set to the same value as ss
-    movq %ss, %rax
-    movq %rax, 0xa8(%rdi)
+    // Use the return pointer to make the saved context
+    // continue immediately after this function
+    movq (%rsp), %rax
+    movq %rax, 0x88(%rdi)
 
     movq %cs, %rax
     movq %rax, 0x90(%rdi)
 
     pushfq
     pop %rax
-    movq %rax, 0x98(%rdi)
-
-    movq %rdi, 0x28(%rdi)
+    movq %rax, 0x98(%rdi) // Rflags
 
     movq %rsp, 0xa0(%rdi)
 
-    // RIP isn't as important because we can use one of the arch_* functions
-    // to set it to a continuation function that just cleans the stack and returns (fuction epilogue)
+    // All data segments are set to the same value as ss
+    movq %ss, %rax
+    movq %rax, 0xa8(%rdi)
 
     ret
 
