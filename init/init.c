@@ -2,6 +2,7 @@
 #include "iridium/syscalls.h"
 #include "iridium/types.h"
 #include "iridium/errors.h"
+#include <stdbool.h>
 
 const char keys[] = {
     [0x2] = '1',
@@ -16,7 +17,7 @@ const char keys[] = {
     [0xb] = '0',
     [0xc] = '-',
     [0xd] = '=',
-
+    [0xe] = 8, // Backspace
     [0xf] = '\t',
     [0x10] = 'Q',
     [0x11] = 'W',
@@ -57,6 +58,22 @@ const char keys[] = {
     [0x34] = '.',
     [0x35] = '/',
     [0x36] = 0,
+    [0x37] = '*', // Numpad
+    [0x38] = 0, // Left alt
+    [0x39] = ' ',
+    [0x47] = '7', // Numpad
+    [0x48] = '8', // Numpad
+    [0x49] = '9', // Numpad
+    [0x4a] = '-', // Numpad
+    [0x4b] = '4', // Numpad
+    [0x4c] = '5', // Numpad
+    [0x4d] = '6', // Numpad
+    [0x4e] = '+', // Numpad
+    [0x4f] = '1', // Numpad
+    [0x50] = '2', // Numpad
+    [0x51] = '3', // Numpad
+    [0x52] = '0', // Numpad
+    [0x53] = '.', // Numpad
     [255] = 0
 };
 
@@ -176,6 +193,9 @@ long inportb(ir_handle_t ports, int offset) {
     return value;
 }
 
+#define WAIT_FOR_OUTPUT_FULL() while(!(inportb(ps2_ports, STATUS_PORT_OFFSET) & 1))
+#define WAIT_FOR_INPUT_CLEAR() while(inportb(ps2_ports, STATUS_PORT_OFFSET) & 2)
+
 char keyboard_read() {
 
     int attempts = 1000;
@@ -189,24 +209,18 @@ char keyboard_read() {
     return 'e'; // Error character
 }
 
-char keyboard_write(unsigned char value) {
-    int attempts = 100000;
-
-    while(attempts--) {
-        if (!(inportb(ps2_ports, STATUS_PORT_OFFSET) & 2)) {
-            outportb(ps2_ports, DATA_PORT_OFFSET, value);
-        }
-    }
-
-    // Return the ack or response byte
-    return keyboard_read();
+static inline void keyboard_write(unsigned char value) {
+    WAIT_FOR_INPUT_CLEAR();
+    outportb(ps2_ports, DATA_PORT_OFFSET, value);
 }
 
 void keyboard_thread() {
 
     sys_print("Starting keyboard thread\n");
 
-    ir_status_t status = syscall_3(SYSCALL_IOPORT_CREATE, 60, 5, (long)&ps2_ports);
+    bool is_dual_channel = true;
+
+    ir_status_t status = syscall_3(SYSCALL_IOPORT_CREATE, 0x60, 5, (long)&ps2_ports);
     if (status) {
         syscall_2(SYSCALL_SERIAL_OUT, (long)"Error %d getting ports\n", status);
     }
@@ -214,58 +228,119 @@ void keyboard_thread() {
     long value = 0;
 
     // Disable other devices that might interfere with setup
+    WAIT_FOR_INPUT_CLEAR();
     outportb(ps2_ports, COMMAND_PORT_OFFSET, 0xad);
+    WAIT_FOR_INPUT_CLEAR();
     outportb(ps2_ports, COMMAND_PORT_OFFSET, 0xa7);
 
     // Clear the input buffer (if applicable) by reading the port and discarding the value
-    keyboard_read();
+    int s = inportb(ps2_ports, STATUS_PORT_OFFSET);
+    while (s & 2) {
+        inportb(ps2_ports, DATA_PORT_OFFSET);
+        s = inportb(ps2_ports, STATUS_PORT_OFFSET);
+    }
 
-    outportb(ps2_ports, DATA_PORT_OFFSET, 0x20);
+    // Configure ps2 controller for initialization
+    WAIT_FOR_INPUT_CLEAR();
+    outportb(ps2_ports, COMMAND_PORT_OFFSET, 0x20);
+    WAIT_FOR_OUTPUT_FULL();
+    int config = inportb(ps2_ports, DATA_PORT_OFFSET);
+    config &= ~(3 | (1 << 6)); // Disable translation and interrupts
+    if (config & (1 << 5)) { // Bit 5 indicates the second port's clock is disabled
+        is_dual_channel = false;
+    }
+    WAIT_FOR_INPUT_CLEAR();
+    outportb(ps2_ports, COMMAND_PORT_OFFSET, 0x60);
+    WAIT_FOR_INPUT_CLEAR();
+    outportb(ps2_ports, DATA_PORT_OFFSET, config);
+
+    // Perform a self-test of the controller
+    WAIT_FOR_INPUT_CLEAR();
+    outportb(ps2_ports, COMMAND_PORT_OFFSET, 0xaa);
+    WAIT_FOR_OUTPUT_FULL();
+    int response = inportb(ps2_ports, DATA_PORT_OFFSET);
+    if (response != 0x55) {
+        syscall_2(SYSCALL_SERIAL_OUT, (long)"Cannot initialize keyboard - ps/2 controller failed self test (Returned %#x).\n", response);
+        while (1);
+    }
+
+    sys_print("PS/2 self test passed\n");
+
+    // In case the self test caused a reset, restore the configuration
+    WAIT_FOR_INPUT_CLEAR();
+    outportb(ps2_ports, COMMAND_PORT_OFFSET, 0x60);
+    WAIT_FOR_INPUT_CLEAR();
+    outportb(ps2_ports, DATA_PORT_OFFSET, config);
+
+    // Test for the second port
+    if (is_dual_channel) {
+        WAIT_FOR_INPUT_CLEAR();
+        outportb(ps2_ports, COMMAND_PORT_OFFSET, 0xa8); // Enable the second port
+
+        // If the port
+        WAIT_FOR_INPUT_CLEAR();
+        outportb(ps2_ports, COMMAND_PORT_OFFSET, 0x20);
+        WAIT_FOR_OUTPUT_FULL();
+        int config = inportb(ps2_ports, DATA_PORT_OFFSET);
+        if (config & (1 << 5)) { // Bit 5 indicates the second port's clock is disabled
+            is_dual_channel = false;
+            outportb(ps2_ports, COMMAND_PORT_OFFSET, 0xa7);
+        } else { sys_print("Second PS/2 port present\n"); }
+    }
+
+
 
     // Enable ps2 port 1 interrupts and translation to scancode set 1
-    syscall_4(SYSCALL_IOPORT_SEND, ps2_ports, DATA_PORT_OFFSET, 0x60, SIZE_BYTE);
-    outportb( ps2_ports, DATA_PORT_OFFSET, (value | 1 | (1 << 6)));
-
-    outportb(ps2_ports, COMMAND_PORT_OFFSET, 0xae);
-
-    value = keyboard_write(0xf4);
-    syscall_2(SYSCALL_SERIAL_OUT, (long)"%c", value);
+    WAIT_FOR_INPUT_CLEAR();
+    outportb(ps2_ports, COMMAND_PORT_OFFSET, 0x60);
+    WAIT_FOR_INPUT_CLEAR();
+    outportb(ps2_ports, DATA_PORT_OFFSET, (value | 1 | (1 << 6)));
 
     ir_handle_t interrupt;
-    status = syscall_2(SYSCALL_INTERRUPT_CREATE, 34, (long)&interrupt);
+    status = syscall_3(SYSCALL_INTERRUPT_CREATE, 34, 1, (long)&interrupt);
     if (status) {
         syscall_2(SYSCALL_SERIAL_OUT, (long)"Error %d registering interrupt\n", status);
     }
 
+    // Enable interrupts for the first port
+    WAIT_FOR_INPUT_CLEAR();
+    outportb(ps2_ports, COMMAND_PORT_OFFSET, 0xae);
 
-    int position = pitch * 20 + (bpp/8 * 128);
+    keyboard_write(0xf4);
+    WAIT_FOR_OUTPUT_FULL();
+    value = inportb(ps2_ports, DATA_PORT_OFFSET);
+
+    if (value == 0xfa) {
+        sys_print("Keyboard ACKed interrupt enabling\n");
+    } else {
+        sys_print("Failed to enable interrupts\n");
+    }
+
+    //syscall_2(SYSCALL_SERIAL_OUT, (long)"%c", value);
+    s = inportb(ps2_ports, STATUS_PORT_OFFSET);
+    while (s & 2) {
+        value = inportb(ps2_ports, DATA_PORT_OFFSET);
+        syscall_2(SYSCALL_SERIAL_OUT, (long)"%c\n", value);
+        s = inportb(ps2_ports, STATUS_PORT_OFFSET);
+    }
+
+    sys_print("Entering keyboard loop\n");
 
     while (1) {
         // Wait for interrupt
         status = syscall_1(SYSCALL_INTERRUPT_WAIT, interrupt);
         if (status) {
             syscall_2(SYSCALL_SERIAL_OUT, (long)"Error %d waiting for interrupt\n", status);
-            syscall_1(SYSCALL_DEBUG_DUMP_HANDLES, 0);
             while (1) {}
         }
+        syscall_1(SYSCALL_INTERRUPT_ARM, interrupt);
 
-        sys_print("Int");
-        // Read byte
-        value = inportb(ps2_ports, DATA_PORT_OFFSET);
-        syscall_2(SYSCALL_SERIAL_OUT, (long)"%c", keys[value]);
-        syscall_2(SYSCALL_SERIAL_OUT, (long)"(%x)  ", value);
-        while (value != 'e') {
-            value = keyboard_read();
-            syscall_2(SYSCALL_SERIAL_OUT, (long)"(%x)", value);
+        s = inportb(ps2_ports, STATUS_PORT_OFFSET);
+        while (s & 1) {
+            value = inportb(ps2_ports, DATA_PORT_OFFSET);
+            syscall_2(SYSCALL_SERIAL_OUT, (long)"%c", keys[value]);
+            s = inportb(ps2_ports, STATUS_PORT_OFFSET);
         }
-        for (int i = 0; i < 64; i++, position += pitch) {
-            for (int j = 0; j < 64; j++) {
-                framebuffer[position + (j * (bpp / 8))] = 128;
-                framebuffer[position + (j * (bpp / 8)) + 1] = 255 - i;
-                framebuffer[position + (j * (bpp / 8)) + 2] = j;
-            }
-        }
-        position += bpp * 64;
     }
 }
 

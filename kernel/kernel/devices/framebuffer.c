@@ -133,6 +133,27 @@ void framebuffer_print(const char* string) {
             cursor_x = 0;
             cursor_y++;
         }
+        else if (*string == 8) { // Backspace
+            // Only allows deleting of the current row, but this feature isn't meant for kernel space anyway
+            if (cursor_x > 0) {
+                cursor_x--;
+                int start_x = cursor_x * 8;
+                int start_y = cursor_y * 16;
+                // Every row of the glyph is a byte, and each bit in the byte represents a pixel
+                for (int y = 0; y < 16; y++) {
+                    for (int x = 0; x < 8; x++) {
+                        if (fb_bits_per_pixel == 32) {
+                            // Optimized single write for pixel
+                            *(uint32_t*)(framebuffer + ((y + start_y)*fb_pitch) + ((x + start_x)*bytes_per_pixel)) = 0;
+                        } else {
+                            char* pixel = (char*)(framebuffer + ((y + start_y)*fb_pitch) + ((x + start_x)*bytes_per_pixel));
+                            memset(pixel, 0, bytes_per_pixel);
+                        }
+                    }
+                }
+            }
+
+        }
         else {
             // Find the character in the PSF glyph array
             char* glyph = (char*)((uintptr_t)font + font->header_size + (font->bytes_per_glyph * (unsigned char)(*string)));
@@ -147,11 +168,8 @@ void framebuffer_print(const char* string) {
                             // Optimized single write for pixel
                             *(uint32_t*)(framebuffer + ((y + start_y)*fb_pitch) + ((x + start_x)*bytes_per_pixel)) = 0x00ffffff;
                         } else {
-                            // TODO: Assumes 24 bits per pixel
                             char* pixel = (char*)(framebuffer + ((y + start_y)*fb_pitch) + ((x + start_x)*bytes_per_pixel));
-                            pixel[0] = 0xff; // R
-                            pixel[1] = 0xff; // G
-                            pixel[2] = 0xff; // B
+                            memset(pixel, 0xff, bytes_per_pixel);
                         }
                     }
                 }

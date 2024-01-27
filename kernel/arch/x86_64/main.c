@@ -319,8 +319,6 @@ void arch_main(p_addr_t multiboot_physical_addr) {
     if (found_framebuffer) {
         init_framebuffer(framebuffer_addr, framebuffer_width, framebuffer_height,
                          framebuffer_pitch, framebuffer_bpp);
-        // Indicate visually that the framebuffer is working by tinting it dark blue
-        framebuffer_fill_screen(5,18,41);
     } else {
         debug_printf("No framebuffer provided\n");
     }
