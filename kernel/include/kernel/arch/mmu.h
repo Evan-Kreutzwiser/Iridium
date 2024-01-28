@@ -7,7 +7,6 @@
 #include <kernel/memory/vmem.h>
 #include <types.h>
 #include <iridium/types.h>
-#include <iridium/errors.h>
 #include <stddef.h>
 #include <stdint.h>
 

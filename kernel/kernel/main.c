@@ -15,6 +15,7 @@
 #include "arch/defines.h"
 #include "arch/address_space.h"
 #include "iridium/elf.h"
+#include "iridium/errors.h"
 #include <stddef.h>
 
 #include "arch/debug.h"

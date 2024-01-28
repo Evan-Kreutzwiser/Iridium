@@ -18,6 +18,7 @@
 #include "kernel/time.h"
 #include "kernel/arch/mmu.h"
 #include "kernel/arch/arch.h"
+#include "iridium/errors.h"
 #include "align.h"
 #include <stddef.h>
 #include <stdbool.h>

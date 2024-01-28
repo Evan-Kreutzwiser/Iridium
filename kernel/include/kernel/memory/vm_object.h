@@ -4,7 +4,6 @@
 
 #include <kernel/object.h>
 #include <kernel/memory/pmm.h>
-#include <iridium/errors.h>
 #include <iridium/types.h>
 #include <types.h>
 #include <stddef.h>

@@ -11,6 +11,7 @@
 #include "kernel/time.h"
 #include "kernel/main.h"
 #include "arch/registers.h"
+#include "iridium/errors.h"
 #include "iridium/types.h"
 #include <stdbool.h>
 

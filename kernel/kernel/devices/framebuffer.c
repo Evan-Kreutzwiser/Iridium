@@ -9,6 +9,7 @@
 #include "kernel/process.h"
 #include "kernel/string.h"
 #include "kernel/arch/arch.h"
+#include "iridium/errors.h"
 #include "iridium/types.h"
 #include "types.h"
 #include "arch/debug.h"
@@ -32,8 +33,8 @@ struct psf_font_header {
 extern const void FONT_START;
 extern const void FONT_END;
 
-vm_object *framebuffer_vm_object;
-v_addr_t framebuffer;
+static vm_object *framebuffer_vm_object;
+static v_addr_t framebuffer;
 int fb_width;
 int fb_height;
 int fb_pitch;
@@ -193,7 +194,8 @@ void framebuffer_print(const char* string) {
     }
 }
 
-char buffer[2048];
+// Holds sprintf results for displaying to screen
+static char buffer[2048];
 
 void framebuffer_printf(const char * restrict format, ...) {
     if (!framebuffer) {

@@ -1,5 +1,21 @@
 /// @file kernel/memory/v_addr_region.c
 /// @brief Virtual address space management
+///
+/// References and Lifetime:
+/// v_addr_region objects are kept alive by their children, and
+/// keep the memory backing them alive.
+///
+/// If a vm_object is refered to somewhere else and the last
+/// handle to a region mapping it is closed then the region is
+/// garbage collected and the memory remains alive for its other
+/// referrers, even if the region's parent is still alive.
+///
+/// When a region is destoryed all of its child regions are
+/// destroyed as well, and any memory in that region is unmapped.
+/// Handles to destroyed regions remain valid, but any attempted
+/// operations will fail. If the v_addr_region was the only
+/// reference to a mapped vm_object, the memory will be released
+/// as well.
 
 #include "kernel/memory/v_addr_region.h"
 #include "kernel/memory/vm_object.h"
@@ -12,6 +28,7 @@
 #include "kernel/heap.h"
 #include "arch/debug.h"
 #include "arch/defines.h"
+#include "iridium/errors.h"
 #include "iridium/types.h"
 #include "types.h"
 #include "align.h"
@@ -54,8 +71,18 @@ ir_status_t v_addr_region_create_root(address_space *address_space, v_addr_t bas
     return IR_OK;
 }
 
-// Size must be page aligned
-// Caller is responsible for checking flags are allowed by parent
+/// @brief Create a new v_addr_region from a portion of a parent's address space
+///
+/// Caller is responsible for checking flags are allowed by parent (TODO?)
+///
+/// @note New regions have 0 references! If a handle is created and removed the
+/// object will be garbage collected
+/// @param parent
+/// @param length Size of the region in bytes. Rounded upwards to nearest page.
+/// @param flags Memory access permissions for this region and child regions
+/// @param out Output parameter set to the newly created region
+/// @param address_out Output parameter set to the region's base address
+/// @return `IR_OK` If the region was successfully created and added to the parent, or an error code.
 ir_status_t v_addr_region_create(struct v_addr_region *parent, size_t length, uint64_t flags,
         struct v_addr_region **out, v_addr_t *address_out) {
 
@@ -87,9 +114,10 @@ ir_status_t v_addr_region_create(struct v_addr_region *parent, size_t length, ui
 
     //debug_printf("Allocated region at %#p in parent %#p\n", previous_end, parent->base);
 
+    // Regions keep their parents alive but not the other way around
     parent->object.references++;
+
     struct v_addr_region *region = calloc(1, sizeof(struct v_addr_region));
-    region->object.references = 1;
     region->object.type = OBJECT_TYPE_V_ADDR_REGION;
     region->object.parent = (object*)parent;
     region->destroyed = false;
@@ -117,6 +145,8 @@ ir_status_t v_addr_region_create(struct v_addr_region *parent, size_t length, ui
 
 ir_status_t v_addr_region_create_specific(struct v_addr_region *parent, v_addr_t address, size_t length,
         uint64_t flags, struct v_addr_region **out, v_addr_t *address_out) {
+    if (parent->destroyed)
+        return IR_ERROR_BAD_STATE;
 
     // Round start and end bounds outwards to ensure the region is encompased by whole pages
     p_addr_t old_base = address;
@@ -125,9 +155,6 @@ ir_status_t v_addr_region_create_specific(struct v_addr_region *parent, v_addr_t
     length = ROUND_UP_PAGE(old_end) - address;
 
     length = ROUND_UP_PAGE(length);
-    if (parent->destroyed) {
-        return IR_ERROR_BAD_STATE;
-    }
 
     //debug_printf("Allocating %#zx byte region at specific address %#p in parent %#p\n", length, address, parent->base);
 
@@ -145,9 +172,10 @@ ir_status_t v_addr_region_create_specific(struct v_addr_region *parent, v_addr_t
         }
     }
 
+    // Child region keeps parent alive
     parent->object.references++;
     struct v_addr_region *region = calloc(1, sizeof(struct v_addr_region));
-    region->object.references = 1;
+
     region->object.type = OBJECT_TYPE_V_ADDR_REGION;
     region->object.parent = (object*)parent;
     region->can_destroy = true;
@@ -215,9 +243,10 @@ ir_status_t v_addr_region_map_vm_object(struct v_addr_region *parent, uint64_t f
 
         // Try to cleanup the failed mappings
         arch_mmu_unmap(region->containing_address_space, address, vm->page_count);
-        vm->object.references--;
+        object_decrement_references((object*)vm);
+
         // Destroy the region, since the caller cant access memory through it anyway
-        linked_list_find_and_remove(&region->object.children, region, NULL, NULL);
+        linked_list_find_and_remove(&parent->object.children, region, NULL, NULL);
         object_decrement_references((object*)parent);
         free(region);
 
@@ -231,7 +260,7 @@ ir_status_t v_addr_region_map_vm_object(struct v_addr_region *parent, uint64_t f
 
 /// @brief Remove a virtual address region
 ///
-/// Recursively removes all child mappings as well
+/// Recursively removes all child mappings as well.
 /// The caller should obtain the appropriate locks before calling to
 /// maintain reentrancy.
 /// Additionally, if a process is using the associated syscall, the
@@ -241,10 +270,9 @@ ir_status_t v_addr_region_map_vm_object(struct v_addr_region *parent, uint64_t f
 /// The syscall handler is also permitted to redundantly set the
 /// destoryed flag in order to minimize time spent locked
 /// (All attempted operations will fail if the region is destoryed).
-ir_status_t v_addr_region_destroy(struct v_addr_region *region) {
-
-    //debug_printf("Destorying v_addr_region @ %#p\n", (uintptr_t)region);
-    //debug_printf("Base: %#p, Length: %#zx\n", region->base, region->length);
+void v_addr_region_destroy(struct v_addr_region *region) {
+    debug_printf("Destorying v_addr_region @ %#p\n", (uintptr_t)region);
+    debug_printf("Base: %#p, Length: %#zx\n", region->base, region->length);
 
     if (linked_list_find_and_remove(&region->object.parent->children, region, compare_bases, NULL) != IR_OK) {
         debug_printf("Failed to remove region from parent!\n");
@@ -264,25 +292,26 @@ ir_status_t v_addr_region_destroy(struct v_addr_region *region) {
     // Recursively free regions
     struct v_addr_region *child;
     while(linked_list_remove(&region->object.children, 0, (void**)&child) == IR_OK) {
-        if (!child->destroyed) {
+        if (!child->destroyed)
             v_addr_region_destroy(child);
-        }
-        else {
-            debug_print("WARNING: v_addr_region_destory() should not be able to run twice.\n");
-        }
     }
-
-    object_decrement_references((object*)region);
-
-    return IR_OK;
 }
 
 /// @brief Garbage collection handler for `v_addr_region`s
+///
+/// By destroying itself before deleting, it recursively
+/// destorys/disconnects every sub region and prunes the
+/// subtrees not referenced by another handle.
 /// @param region A region with no references
 void v_addr_region_cleanup(struct v_addr_region *region) {
     // Very little cleanup is needed, since it won't have any references
     // and when it is destoryed, leaving it unmapped and without a parent or children.
-    //debug_printf("Freeing region @ %#p, %#p bytes long\n", region->base, region->length);
+    debug_printf("Freeing region @ %#p, %#p bytes long\n", region->base, region->length);
+    // Cleanup this object and its descendants, removing memory mappings and potentially freeing vm_objects
+    if (!region->destroyed) {
+        v_addr_region_destroy(region);
+    }
+
     free(region);
 }
 
@@ -359,8 +388,6 @@ ir_status_t sys_v_addr_region_map(ir_handle_t parent, ir_handle_t vm_object, uin
     }
     if (parent_handle->object->type != OBJECT_TYPE_V_ADDR_REGION || vm_object_handle->object->type != OBJECT_TYPE_VM_OBJECT) {
         spinlock_release(process->handle_table_lock);
-        debug_printf("Wrong handle types! Expected 1 and 2, got %d and %d (handles at %#p and %#p)\n", parent_handle->object->type, vm_object_handle->object->type, parent_handle, vm_object_handle);
-        debug_printf("Objects at %#p and %#p\n", parent_handle->object, vm_object_handle->object);
         return IR_ERROR_WRONG_TYPE;
     }
     struct v_addr_region *parent_region = (struct v_addr_region*)parent_handle->object;
@@ -381,5 +408,31 @@ ir_status_t sys_v_addr_region_map(ir_handle_t parent, ir_handle_t vm_object, uin
     spinlock_release(process->handle_table_lock);
     *region_out = child_handle->handle_id;
     *address_out = address;
+    return IR_OK;
+}
+
+ir_status_t sys_v_addr_region_destroy(ir_handle_t region) {
+    struct process *process = (struct process*)this_cpu->current_thread->object.parent;
+    spinlock_aquire(process->handle_table_lock);
+
+    struct handle *region_handle;
+    ir_status_t status = linked_list_find(&process->handle_table, (void*)region, handle_by_id, NULL, (void**)&region_handle);
+    if (status != IR_OK) {
+        spinlock_release(process->handle_table_lock);
+        return IR_ERROR_BAD_HANDLE;
+    }
+    if (region_handle->object->type != OBJECT_TYPE_V_ADDR_REGION) {
+        spinlock_release(process->handle_table_lock);
+        return IR_ERROR_WRONG_TYPE;
+    }
+
+    spinlock_release(process->handle_table_lock);
+    // Can't destory address space roots. Only parent process termination can remove them.
+    if (!((struct v_addr_region*)region_handle->object)->can_destroy) {
+        return IR_ERROR_ACCESS_DENIED;
+    }
+
+    v_addr_region_destroy((struct v_addr_region*)region_handle->object);
+
     return IR_OK;
 }

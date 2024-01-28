@@ -10,13 +10,16 @@
 #include "kernel/arch/mmu.h"
 #include "kernel/string.h"
 #include "kernel/heap.h"
+#include "iridium/errors.h"
 #include "arch/defines.h"
 #include "arch/debug.h"
 
 #define __need_null
 #include <stddef.h>
 
+/// Holds the processor specific data referenced using `this_cpu`
 struct per_cpu_data processor_local_data[MAX_CPUS_COUNT];
+/// Number of logical processors ("threads") in the computer
 int cpu_count;
 
 int next_thread_id = 1;
@@ -170,6 +173,7 @@ ir_status_t sys_process_create(ir_handle_t *process, ir_handle_t *v_addr_region)
     return IR_OK;
 }
 
+/// @brief Create a blank thread primitive. Must be started using `sys_thread_start`
 ir_status_t sys_thread_create(ir_handle_t parent_process, ir_handle_t *out) {
     // TODO: Checks
     struct process *process = (struct process*)this_cpu->current_thread->object.parent;
@@ -197,6 +201,12 @@ ir_status_t sys_thread_create(ir_handle_t parent_process, ir_handle_t *out) {
     return IR_OK;
 }
 
+/// @brief Begin execution of a thread created with `sys_thread_create`
+/// @param thread A new thread that has been adequate but has not yet begun execution
+/// @param entry Instruction pointer where the thread will begin execution
+/// @param stack_top The threads initial stack pointer
+/// @param arg0
+/// @return
 ir_status_t sys_thread_start(ir_handle_t thread, uintptr_t entry, uintptr_t stack_top, uintptr_t arg0) {
     if (!arch_validate_user_pointer((void*)entry) || !arch_validate_user_pointer((void*)stack_top)) {
         return IR_ERROR_INVALID_ARGUMENTS;

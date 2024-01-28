@@ -10,6 +10,7 @@
 #include "kernel/spinlock.h"
 #include "kernel/memory/physical_map.h"
 #include "kernel/arch/mmu.h"
+#include "iridium/errors.h"
 
 #include <stddef.h>
 #include <stdint.h>

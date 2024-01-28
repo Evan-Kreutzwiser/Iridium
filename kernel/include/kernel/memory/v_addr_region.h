@@ -20,8 +20,10 @@ struct v_addr_region {
     /// prevent existing handles from operating on it
     bool destroyed;
 
-    /// Helps memory mapping functions find the target addres space to manipulate.
+    /// @brief Helps memory mapping functions find the target addres space to manipulate.
     /// This does not change through the lifetime of the object.
+    /// Not relying on the parent process for the pointer allows processes to
+    /// modify childrens' address spaces while they hold the appropriate handles
     address_space *containing_address_space;
 
     /// Used if this region was created by mapping a vm_object into an address region, otherwise null.
@@ -47,7 +49,7 @@ ir_status_t v_addr_region_map_vm_object(struct v_addr_region *parent, uint64_t f
 
 /// Remove a virtual address region
 /// Handles will continue to reference it but all operations on it afterwards will fail
-ir_status_t v_addr_region_destroy(struct v_addr_region *region);
+void v_addr_region_destroy(struct v_addr_region *region);
 
 /// @brief Garbage collection for virtual address regions
 /// @param region An unused `v_addr_region`
@@ -58,4 +60,8 @@ ir_status_t sys_v_addr_region_create(ir_handle_t parent, size_t length, uint64_t
 
 /// @brief SYSCALL_V_ADDR_REGION_MAP
 ir_status_t sys_v_addr_region_map(ir_handle_t parent, ir_handle_t vm_object, uint64_t flags, ir_handle_t *region_out, uintptr_t *address_out);
+
+/// @brief SYSCALL_V_ADDR_REGION_DESTROY
+ir_status_t sys_v_addr_region_destroy(ir_handle_t region);
+
 #endif // ! KERNEL_MEMORY_V_ADDR_REGION_H_

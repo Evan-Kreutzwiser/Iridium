@@ -42,13 +42,15 @@ static ir_handle_t handle_get_next_id(struct process *process) {
     return (ir_handle_t)new_id;
 }
 
-/// @brief Create a handle for a kernel object for the current process.
+/// @brief Create a handle for a kernel object for a given process.
 /// NOTE: Does not add to the handle table. The caller must do that after calling.
-/// @param process
-/// @param object
-/// @param rights
-/// @param handle
-/// @return
+/// @param process Used to determine the next handle id and prevent the process
+///                from reusing it
+/// @param object Object to be referenced by the handle.
+///               This handle counts has a reference to the object, keeping it alive
+/// @param rights Access rights determining what holders of the handle can do with or to the object
+/// @param handle Output parameter set to the new handle
+/// @return `IR_OK` on success
 ir_status_t handle_create(struct process *process, object *object, ir_rights_t rights, struct handle **handle) {
     object->references++;
 

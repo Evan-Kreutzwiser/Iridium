@@ -10,10 +10,12 @@
 #include "kernel/handle.h"
 #include "kernel/heap.h"
 #include "kernel/arch/arch.h"
+#include "iridium/errors.h"
 
 #include "arch/debug.h"
 
 /// @brief Functions for operating on a type of object
+/// TODO: Only cleanup function is actually used
 struct obj_functions {
     object_read read;
     object_write write;
