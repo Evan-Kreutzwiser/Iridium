@@ -15,6 +15,11 @@
 
 #include "arch/debug.h"
 
+struct _node {
+    struct _node* next;
+    void *data;
+};
+
 /// @brief Default linked list searching function
 ///
 /// The search function used when given a null search function.
@@ -235,4 +240,23 @@ ir_status_t linked_list_find_and_remove(linked_list *list, void *target, search_
     spinlock_release(list->lock);
 
     return IR_ERROR_NOT_FOUND;
+}
+
+/// Free a list, discarding all data contained in it. The caller may free the
+/// linked_list object after calling.
+/// NOTE: Don't use if other threads may attempt to access the list afterwards.
+///       It is preferable to remove each element of the list instead.
+/// WARNING: Will cause memory leaks if used incorrectly.
+void linked_list_destroy(linked_list *list) {
+
+    _node *node = list->head;
+    while (node) {
+        _node *next = node->next;
+        free(node);
+        node = next;
+    }
+
+    list->count = 0;
+    list->head = NULL;
+    list->tail = NULL;
 }
