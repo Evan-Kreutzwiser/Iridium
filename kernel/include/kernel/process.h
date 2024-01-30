@@ -89,10 +89,12 @@ void create_idle_process(void);
 /// @brief Create an idle thread for a cpu to schedule when nothing else is available
 struct thread *create_idle_thread(void);
 
+ir_status_t task_create(struct task *parent);
 ir_status_t process_create(struct process **process_out, struct v_addr_region **virtual_address_space_out);
 ir_status_t thread_create(struct process *init_process, struct thread **out);
 
-ir_status_t task_create(struct task *parent);
+
+ir_status_t thread_start(struct thread *thread, uintptr_t entry, uintptr_t stack_top, uint64_t arg0);
 
 /// Begin termination of a process
 /// Object must be locked before calling

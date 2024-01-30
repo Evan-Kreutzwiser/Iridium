@@ -460,8 +460,6 @@ ir_status_t paging_unmap_page(page_table_entry *table, v_addr_t virtual_address)
     // Previously used &virtual_address, accidentally invalidating cache for the stack instead of target memory
     asm volatile ("invlpg (%0)" : : "r" (virtual_address) : "memory");
 
-    debug_printf("Unmapped page for %#p\n", virtual_address);
-
     return IR_OK;
 }
 

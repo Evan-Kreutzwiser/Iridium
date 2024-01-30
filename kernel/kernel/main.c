@@ -1,30 +1,30 @@
 /// @file kernel/main.c
 /// @brief Encapsulates generic portion of kernel startup routines
 
-#include "kernel/main.h"
-#include "kernel/arch/arch.h"
-#include "kernel/arch/mmu.h"
-#include "kernel/heap.h"
-#include "kernel/process.h"
-#include "kernel/string.h"
-#include "kernel/devices/framebuffer.h"
-#include "kernel/memory/init.h"
-#include "kernel/memory/v_addr_region.h"
-#include "kernel/memory/physical_map.h"
-#include "types.h"
-#include "arch/defines.h"
 #include "arch/address_space.h"
+#include "arch/defines.h"
 #include "iridium/elf.h"
 #include "iridium/errors.h"
+#include "kernel/arch/arch.h"
+#include "kernel/arch/mmu.h"
+#include "kernel/devices/framebuffer.h"
+#include "kernel/heap.h"
+#include "kernel/main.h"
+#include "kernel/memory/init.h"
+#include "kernel/memory/physical_map.h"
+#include "kernel/memory/v_addr_region.h"
+#include "kernel/process.h"
+#include "kernel/scheduler.h"
+#include "kernel/string.h"
+#include "types.h"
 #include <stddef.h>
 
 #include "arch/debug.h"
 
-/// @brief Run kernel startup routines to prepare memory systems
+/// @brief Run kernel startup routines to prepare memory systems.
+/// Once startup code runs this function all kernel memory systems are online,
+/// and cores can begin creating their idle threads.
 void kernel_startup() {
-    // Prepare a temporary bootstrap heap
-    //heap_early_init();
-
     // Setup physical memory allocation
     // Arch entry code gave this a list of memory regions to use earlier
     // and at this point the physical memory kernel mapping is in place.
@@ -32,9 +32,6 @@ void kernel_startup() {
 
     // Set up the kernel address space object using the previously created mapping
     virtual_memory_init();
-
-    // Transition to a larger heap now that memory can be tracked properly
-    //heap_finish_init();
 
     // Once this has run, cores can ask for their idle threads
     create_idle_process();
@@ -124,13 +121,12 @@ void kernel_main(v_addr_t initrd_start_address) {
     if (status) {
         debug_printf("Error %d creating init thread\n", status);
     }
-    arch_set_instruction_pointer(&thread->context, header->e_entry);
-    arch_set_stack_pointer(&thread->context, stack_address + (PAGE_SIZE * 256) -16);
-    arch_mmu_set_address_space(&init_process->address_space);
 
-    debug_printf("Entering init process: Jmp to %#p with stack %#p\n", header->e_entry, stack_address + (PAGE_SIZE * 256) -16);
-    this_cpu->current_thread = thread;
-    arch_enter_context(&thread->context);
+    debug_printf("Init process created: Entry point is %#p with stack %#p\n", header->e_entry, stack_address + (PAGE_SIZE * 256) -16);
+    thread_start(thread, header->e_entry, stack_address + (PAGE_SIZE * 256) -16, 0);
+
+    debug_printf("Begining scheduler\n");
+    switch_task(false);
 }
 
 void panic(struct registers *context, int error_code, char *message) {

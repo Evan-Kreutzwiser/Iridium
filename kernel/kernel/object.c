@@ -80,7 +80,7 @@ void object_decrement_references(object* obj) {
     obj->references--;
 
     if (obj->references > 10000) {
-        debug_printf("Something isn't right here. Obj has too many references (underflow?)\n");
+        debug_printf("Something isn't right here. Type %d object has too many references (underflow?)\n", obj->type);
     }
 
     if (obj->references == 0) {
@@ -180,7 +180,7 @@ ir_status_t sys_object_wait(ir_handle_t object_handle, ir_signal_t target_signal
 
         // TODO: Find better way to prevent overflows
         // -1 means never expire
-        if (timeout_microseconds == -1) {
+        if (timeout_microseconds == -1ul) {
             listener->deadline = -1;
         }
 

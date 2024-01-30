@@ -443,16 +443,16 @@ void sleeping_thread(void) {
 
 }
 
-void thread_that_kills_itself(void) {
-    // 1 second
-    syscall_1(SYSCALL_SLEEP_MICROSECONDS, 1000000);
+void thread_that_exits(void) {
+    // 4 second
+    syscall_1(SYSCALL_SLEEP_MICROSECONDS, 4000000);
     syscall_1(SYSCALL_THREAD_EXIT, -1);
 }
 
 void _start(void) {
-    sys_print("--------\nHello from the init process!\n--------\n");
+    sys_print("--------\nHello from the init process!\n--------\nWaiting for test thread to exit...\n");
 
-    spawn_thread_and_wait_for_exit(thread_that_kills_itself);
+    spawn_thread_and_wait_for_exit(thread_that_exits);
 
     ir_status_t status = get_framebuffer(&framebuffer_handle, &width, &height, &pitch, &bpp);
     if (status == IR_OK) {

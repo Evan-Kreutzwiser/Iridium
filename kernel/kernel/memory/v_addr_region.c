@@ -274,8 +274,11 @@ void v_addr_region_destroy(struct v_addr_region *region) {
     debug_printf("Destorying v_addr_region @ %#p\n", (uintptr_t)region);
     debug_printf("Base: %#p, Length: %#zx, Parent: %#p\n", region->base, region->length, region->object.parent);
 
-    if (linked_list_find_and_remove(&region->object.parent->children, region, compare_bases, NULL) != IR_OK) {
-        debug_printf("Failed to remove region from parent!\n");
+    // Root regions have no parent, and are managed by the associated process directly
+    if (region->object.parent) {
+        if (linked_list_find_and_remove(&region->object.parent->children, region, compare_bases, NULL) != IR_OK) {
+            debug_printf("Failed to remove region from parent!\n");
+        }
     }
 
     // Prevents further operations on the object

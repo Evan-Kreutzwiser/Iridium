@@ -145,8 +145,8 @@ ir_status_t thread_create(struct process* parent_process, struct thread **out) {
         }
     }
 
-    spinlock_release(parent_process->object.lock);
     linked_list_find_and_remove(&parent_process->object.children, thread, NULL, NULL);
+    spinlock_release(parent_process->object.lock);
     free(thread);
 
     return IR_ERROR_NO_MEMORY;
@@ -163,6 +163,9 @@ ir_status_t thread_start(struct thread *thread, uintptr_t entry, uintptr_t stack
     arch_set_instruction_pointer(&thread->context, entry);
     arch_set_stack_pointer(&thread->context, stack_top);
     arch_set_arg_0(&thread->context, arg0);
+
+    // Executing contexts keep themselves alive
+    thread->object.references++;
 
     schedule_thread(thread);
 
@@ -294,6 +297,7 @@ void process_kill_locked(struct process *process, long exit_code) {
         struct thread *thread;
         linked_list_get(&process->object.children, i, (void**)&thread);
         thread->state = TERMINATING;
+        thread->exit_code = -1ul;
         // Wake up blocking threads to avoid waiting to cleanup the process
         if (thread->blocking_listener) {
             scheduler_unblock_listener(thread->blocking_listener);
@@ -323,14 +327,10 @@ void process_finish_termination(struct process *process) {
 
     // Unmap all of the memory backing this process, even if others have handles to the regions
     v_addr_region_destroy(process->root_v_addr_region);
-    //object_decrement_references(process->root_v_addr_region);
 
-    // The process no longer keeps itself alive. Due to the methods chosen for
-    /// terminating its threads this should be running in a different context,
-    // so we aren't ripping our memory out from under us.
+    // Without executing threads the process is not keeping itself alive
     // The object itself sticks around (inactive) until any handles to it are closed
     // This allows other processes to read its exit code after it terminates
-    object_decrement_references((object*)process);
 }
 
 /// Use to transition an ending thread from `TERMINATING` to `TERMINATED`
@@ -339,17 +339,31 @@ void process_finish_termination(struct process *process) {
 void thread_finish_termination(struct thread *thread) {
     thread->state = TERMINATED;
 
-    spinlock_aquire(thread->object.parent->lock);
-    linked_list_find_and_remove(&thread->object.parent->children, thread, NULL, NULL);
-    object_decrement_references(thread->object.parent);
-    spinlock_release(thread->object.parent->lock);
+    object *process = (object *)thread->object.parent;
+
+    spinlock_aquire(process->lock);
+
+    // If this was the last thread the process as a whole has terminated
+    if (process->children.count == 1) {
+        debug_printf("Last thread exiting, cleaning process\n");
+        if (((struct process*)process)->state == ACTIVE) {
+            process_kill_locked((struct process*)process, thread->exit_code);
+        }
+        process_finish_termination((struct process*)process);
+    }
+
+    linked_list_find_and_remove(&process->children, thread, NULL, NULL);
+    spinlock_release(process->lock);
+    object_decrement_references(process);
+
 
     v_addr_region_cleanup(thread->kernel_stack);
 
     // Alert any processes with handles that we have exited
     object_set_signals(&thread->object, thread->object.signals | PROCESS_SIGNAL_TERMINATED);
 
-    // Thread is no longer keeping itself alive by executing. The inactive object will be kept alive if there are other
+    // Thread is no longer keeping itself alive by executing.
+    // The inactive object will still be kept alive if there are other referrers
     object_decrement_references(&thread->object);
 }
 
@@ -389,6 +403,6 @@ ir_status_t sys_thread_exit(long exit_code) {
     this_cpu->current_thread->exit_code = exit_code;
     debug_printf("Thread exiting\n");
 
-    // Thread will terminate upon returning, and `thread_finish_termination` with run
+    // Thread will discontinue execution upon returning, and `thread_finish_termination` will run next time it is scheduled
     return IR_OK;
 }
