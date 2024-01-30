@@ -354,7 +354,7 @@ void keyboard_thread() {
         s = inportb(ps2_ports, STATUS_PORT_OFFSET);
     }
 
-    sys_print("Entering keyboard loop\n");
+    sys_print("Entering keyboard loop - press left alt to terminate init process\n");
 
     while (1) {
         // Wait for interrupt
@@ -368,6 +368,11 @@ void keyboard_thread() {
         s = inportb(ps2_ports, STATUS_PORT_OFFSET);
         while (s & 1) {
             value = inportb(ps2_ports, DATA_PORT_OFFSET);
+            if (value == 0x38) {
+                sys_print("\nEnding process.\n");
+                syscall_1(SYSCALL_PROCESS_EXIT, -4);
+            }
+
             syscall_2(SYSCALL_SERIAL_OUT, (long)"%c", keys[value]);
             s = inportb(ps2_ports, STATUS_PORT_OFFSET);
         }
