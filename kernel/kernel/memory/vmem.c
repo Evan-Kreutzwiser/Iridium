@@ -1,14 +1,16 @@
 
+#include "kernel/arch/mmu.h"
+#include "kernel/memory/init.h"
+#include "kernel/memory/physical_map.h"
 #include "kernel/memory/vmem.h"
 #include "kernel/memory/v_addr_region.h"
-#include "kernel/memory/physical_map.h"
-#include "kernel/memory/init.h"
 #include "arch/defines.h"
 #include "arch/debug.h"
 #include "align.h"
 #include <stdbool.h>
 #include <stddef.h>
 
+// TODO: Make arch-defined
 v_addr_t physical_map_base = 0xffff800000000000ul; // The physical map will be at -128 TB, the bottom of kernel space
 size_t physical_map_length =        0x8000000000ul; // 512 GB (Hardcoded memory limit)
 
@@ -50,7 +52,14 @@ void init_kernel_address_space(address_space *addr_space) {
     is_kernel_address_space_set_up = true;
 }
 
-// Retrieve the kernel address space for modifying kernel mappings
+/// Retrieve the kernel address space for modifying kernel mappings
 address_space *get_kernel_address_space() {
     return &kernel_address_space;
+}
+
+/// Switch to the kernel memory context, with no user thread
+/// NOTE: Clears this_cpu->current_thread
+void enter_kernel_context() {
+    arch_mmu_enter_kernel_address_space();
+    this_cpu->current_thread = NULL;
 }

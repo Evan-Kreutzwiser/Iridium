@@ -31,9 +31,8 @@ const syscall syscall_table[] = {
     [SYSCALL_HANDLE_REPLACE] = (syscall)(uintptr_t)sys_handle_replace,
     [SYSCALL_HANDLE_CLOSE] = (syscall)(uintptr_t)sys_handle_close,
     [SYSCALL_SERIAL_OUT] = (syscall)(uintptr_t)sys_serial_out,
-    // TODO: Implement destructive syscalls
-    //[SYSCALL_PROCESS_EXIT] = (syscall)(uintptr_t)sys_process_exit,
-    //[SYSCALL_THREAD_EXIT] = (syscall)(uintptr_t)sys_thread_exit,
+    [SYSCALL_PROCESS_EXIT] = (syscall)(uintptr_t)sys_process_exit,
+    [SYSCALL_THREAD_EXIT] = (syscall)(uintptr_t)sys_thread_exit,
     [SYSCALL_PROCESS_CREATE] = (syscall)(uintptr_t)sys_process_create,
     [SYSCALL_THREAD_CREATE] = (syscall)(uintptr_t)sys_thread_create,
     [SYSCALL_V_ADDR_REGION_CREATE] = (syscall)(uintptr_t)sys_v_addr_region_create,
@@ -52,6 +51,7 @@ const syscall syscall_table[] = {
     [SYSCALL_INTERRUPT_CREATE] = (syscall)(uintptr_t)sys_interrupt_create,
     [SYSCALL_INTERRUPT_WAIT] = (syscall)(uintptr_t)sys_interrupt_wait,
     [SYSCALL_INTERRUPT_ARM] = (syscall)(uintptr_t)sys_interrupt_arm,
+    [SYSCALL_OBJECT_WAIT] = (syscall)(uintptr_t)sys_object_wait,
 };
 
 uint syscall_count = sizeof(syscall_table) / sizeof(syscall);
@@ -60,21 +60,23 @@ uint syscall_count = sizeof(syscall_table) / sizeof(syscall);
 /// @param syscall_num The id of the system call the kernel is requested to perform
 /// @return The value returned by the performed system call
 int64_t syscall_handler(unsigned int syscall_num, long arg0, long arg1, long arg2, long arg3, long arg4) {
-
-    // Avoid leaving the kernel in a bad state by delaying potential termination until the syscall is complete
-    this_cpu->current_thread->in_syscall = true;
-
-    //debug_printf("Thread %d using syscall %s\n", this_cpu->current_thread->thread_id, syscall_names[syscall_num]);
-
     if (syscall_num > syscall_count || syscall_table[syscall_num] == NULL) {
-        debug_printf("User process called nonexistant syscall #%u, arg0: %#lx, arg1: %#lx, arg2: %#lx, arg3: %#lx, arg4: %#lx\n", syscall_num, arg0, arg1, arg2, arg3, arg4);
         return IR_ERROR_INVALID_ARGUMENTS;
     }
+    // Avoid leaving the kernel in a bad state by delaying potential termination until the syscall is complete
+    this_cpu->current_thread->in_syscall = true;
 
     ir_status_t result = syscall_table[syscall_num](arg0, arg1, arg2, arg3, arg4);
 
     // TODO: Check that the process isn't being killed
     this_cpu->current_thread->in_syscall = false;
+
+    if (this_cpu->current_thread->state == TERMINATING) {
+        //thread_finish_termination(this_cpu->current_thread);
+        // We can't free kernel stack while we're using it, so switch away and the
+        // thread can be cleaned up next time it would have been scheduled
+        switch_task(true);
+    }
 
     return result;
 }

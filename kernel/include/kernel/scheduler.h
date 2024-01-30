@@ -16,7 +16,7 @@ ir_status_t sys_sleep_microseconds(size_t microseconds);
 void schedule_thread(struct thread *thread);
 void switch_task(bool reschedule);
 
-void scheduler_block_listener_and_switch(struct signal_listener *listener);
+ir_status_t scheduler_block_listener_and_switch(struct signal_listener *listener);
 void scheduler_unblock_listener(struct signal_listener *listener);
 void scheduler_sleep_microseconds(struct thread *thread, size_t microseconds);
 

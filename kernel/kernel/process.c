@@ -46,7 +46,7 @@ struct thread* create_idle_thread() {
     // Since this is only called during startup we don't need to do error checking
     struct thread* idle_thread = calloc(1, sizeof(struct thread));
 
-    linked_list_add(&idle_process->threads, idle_thread);
+    linked_list_add(&idle_process->object.children, idle_thread);
     idle_thread->object.parent = (object*)idle_process;
 
     idle_thread->thread_id = 0;
@@ -112,21 +112,44 @@ ir_status_t process_create(struct process **process_out, struct v_addr_region **
 ir_status_t thread_create(struct process* parent_process, struct thread **out) {
 
     struct thread *thread = calloc(1, sizeof(struct thread));
+    if (!thread) { return IR_ERROR_NO_MEMORY; }
 
+    spinlock_aquire(parent_process->object.lock);
+
+    if (linked_list_add(&parent_process->object.children, thread) != IR_OK) {
+        spinlock_release(parent_process->object.lock);
+        free(thread);
+        return IR_ERROR_NO_MEMORY;
+    }
+
+    thread->object.type = OBJECT_TYPE_THREAD;
     thread->object.parent = (object*)parent_process;
     arch_initialize_thread_context(&thread->context, false);
     thread->thread_id = next_thread_id;
     next_thread_id++;
     vm_object *kernel_stack_vm;
     v_addr_t stack_base;
-    vm_object_create(PER_THREAD_KERNEL_STACK_SIZE, VM_READABLE | VM_WRITABLE, &kernel_stack_vm);
-    v_addr_region_map_vm_object(kernel_region, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE,
-        kernel_stack_vm, &thread->kernel_stack, 0, &stack_base);
-    // 16 Byte align the top of the stack without entering the next page
-    thread->kernel_stack_top = stack_base + PER_THREAD_KERNEL_STACK_SIZE - 16;
+    if (vm_object_create(PER_THREAD_KERNEL_STACK_SIZE, VM_READABLE | VM_WRITABLE, &kernel_stack_vm) == IR_OK) {
+        if (v_addr_region_map_vm_object(kernel_region, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE,
+                kernel_stack_vm, &thread->kernel_stack, 0, &stack_base) == IR_OK) {
 
-    *out = thread;
-    return IR_OK;
+            parent_process->object.references++;
+            spinlock_release(parent_process->object.lock);
+            // 16 Byte align the top of the stack without entering the next page
+            thread->kernel_stack_top = stack_base + PER_THREAD_KERNEL_STACK_SIZE - 16;
+
+            *out = thread;
+            return IR_OK;
+        } else {
+            vm_object_cleanup(kernel_stack_vm);
+        }
+    }
+
+    spinlock_release(parent_process->object.lock);
+    linked_list_find_and_remove(&parent_process->object.children, thread, NULL, NULL);
+    free(thread);
+
+    return IR_ERROR_NO_MEMORY;
 }
 
 /// @brief Begin execution of a thread
@@ -230,7 +253,142 @@ ir_status_t sys_thread_start(ir_handle_t thread, uintptr_t entry, uintptr_t stac
     return IR_OK;
 }
 
-/// Save an interrupt context to be reentered later
-void thread_save_context(struct registers *context, struct thread *thread) {
-    memcpy(&thread->context, context, sizeof(struct registers));
+ir_status_t task_create(struct task *parent) {
+    spinlock_aquire(parent->object.lock);
+    if (parent->state != ACTIVE) {
+        spinlock_release(parent->object.lock);
+        return IR_ERROR_BAD_STATE;
+    }
+
+    parent->object.references++;
+
+    struct task *new_task = calloc(1, sizeof(struct task));
+
+    if (!new_task) return IR_ERROR_NO_MEMORY;
+
+    new_task->object.type = OBJECT_TYPE_TASK;
+    new_task->object.parent = (object*)parent;
+
+    linked_list_add(&parent->object.children, new_task);
+
+    return IR_OK;
+}
+
+/// Begin termination of a process
+/// Object must be locked before calling
+void process_kill_locked(struct process *process, long exit_code) {
+    // Remove the process from the parent task
+    if (process->object.parent) { // Tasks don't work yet
+        spinlock_aquire(process->object.parent->lock);
+        linked_list_find_and_remove(&process->object.parent->children, process, NULL, NULL);
+        object_decrement_references(process->object.parent);
+        spinlock_release(process->object.parent->lock);
+    }
+
+    process->state = TERMINATING;
+    process->exit_code = exit_code;
+
+    // Make all threads terminate as soon as possible
+    // The process will be cleaned up once the last dies
+    for (uint i = 0; i < process->object.children.count; i++) {
+        struct thread *thread;
+        linked_list_get(&process->object.children, i, (void**)&thread);
+        thread->state = TERMINATING;
+        // Wake up blocking threads to avoid waiting to cleanup the process
+        if (thread->blocking_listener) {
+            scheduler_unblock_listener(thread->blocking_listener);
+        }
+        thread->sleeping_until = 0;
+    }
+
+    // Alert any processes with handles that we have exited
+    object_set_signals(&process->object, process->object.signals | PROCESS_SIGNAL_TERMINATED);
+
+    // Exit code is available, but not all threads will have stopped yet
+}
+
+/// Remove the memory backing a process and release its held handles.
+/// Transition from `TERMINATING` to `TERMINATED`.
+/// Note: Only call when all threads have been terminated
+void process_finish_termination(struct process *process) {
+
+    // Release any references this process has to other resources
+    struct handle *handle;
+    while (IR_OK == linked_list_remove(&process->handle_table, 0, (void**)&handle)) {
+        object_decrement_references(handle->object);
+        free(handle);
+    }
+
+    linked_list_destroy(&process->free_handle_ids);
+
+    // Unmap all of the memory backing this process, even if others have handles to the regions
+    v_addr_region_destroy(process->root_v_addr_region);
+    //object_decrement_references(process->root_v_addr_region);
+
+    // The process no longer keeps itself alive. Due to the methods chosen for
+    /// terminating its threads this should be running in a different context,
+    // so we aren't ripping our memory out from under us.
+    // The object itself sticks around (inactive) until any handles to it are closed
+    // This allows other processes to read its exit code after it terminates
+    object_decrement_references((object*)process);
+}
+
+/// Use to transition an ending thread from `TERMINATING` to `TERMINATED`
+/// NOTE: Should only be called from outside the thread's context, since
+///       this destroys its stack
+void thread_finish_termination(struct thread *thread) {
+    thread->state = TERMINATED;
+
+    spinlock_aquire(thread->object.parent->lock);
+    linked_list_find_and_remove(&thread->object.parent->children, thread, NULL, NULL);
+    object_decrement_references(thread->object.parent);
+    spinlock_release(thread->object.parent->lock);
+
+    v_addr_region_cleanup(thread->kernel_stack);
+
+    // Alert any processes with handles that we have exited
+    object_set_signals(&thread->object, thread->object.signals | PROCESS_SIGNAL_TERMINATED);
+
+    // Thread is no longer keeping itself alive by executing. The inactive object will be kept alive if there are other
+    object_decrement_references(&thread->object);
+}
+
+
+/// @brief Process garbage collection handler
+void process_cleanup(struct process *process) {
+    debug_printf("Freed an exited process\n");
+    free(process);
+}
+
+/// @brief Thread garbage collection handler
+void thread_cleanup(struct thread *thread) {
+    debug_printf("Freed an exited thread\n");
+    free(thread);
+}
+
+ir_status_t sys_process_exit(long exit_code) {
+    struct process *this_process = (struct process*)this_cpu->current_thread->object.parent;
+
+    // Cannot kill an already exiting process
+    if (this_process->state != ACTIVE) {
+        return IR_ERROR_BAD_STATE;
+    }
+
+    spinlock_aquire(this_process->object.lock);
+
+    process_kill_locked(this_process, exit_code);
+
+    spinlock_release(this_process->object.lock);
+
+    // The thread will exit when returning from the syscall
+    return IR_OK;
+}
+
+ir_status_t sys_thread_exit(long exit_code) {
+    this_cpu->current_thread->state = TERMINATING;
+    this_cpu->current_thread->exit_code = exit_code;
+    debug_printf("Thread exiting\n");
+
+    // Thread will terminate upon returning, and `thread_finish_termination` with run
+    return IR_OK;
 }

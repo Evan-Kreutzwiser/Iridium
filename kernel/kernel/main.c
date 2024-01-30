@@ -104,7 +104,7 @@ void kernel_main(v_addr_t initrd_start_address) {
         memset((void*)address, 0, program_header->p_memsz);
         memcpy((void*)address, (void*)(initrd_start_address + program_header->p_offset), program_header->p_filesz);
 
-        v_addr_region_destroy(kernel_mapping);
+        v_addr_region_cleanup(kernel_mapping);
     }
 
     // Create a stack for the init process

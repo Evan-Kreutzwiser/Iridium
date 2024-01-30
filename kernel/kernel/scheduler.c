@@ -51,12 +51,13 @@ ir_status_t sys_yield() {
     return IR_OK;
 }
 
+/// NOTE: Does not save context. Caller must ensure that the thread has appropriate context to reenter
 void switch_task(bool reschedule) {
-    //arch_enter_critical();
+    arch_enter_critical();
 
     // Before switching tasks, see if there are any threads listening for signals whose deadlines have passed
     struct signal_listener *listener;
-    while (linked_list_get(&waiting_for_signals, 0, (void*)&listener) == IR_OK && listener->deadline < microseconds_since_boot) {
+    while (linked_list_get(&waiting_for_signals, 0, (void**)&listener) == IR_OK && listener->deadline < microseconds_since_boot) {
         // TODO: Lock for multiprocessing environment
         linked_list_remove(&waiting_for_signals, 0, NULL);
         scheduler_unblock_listener(listener);
@@ -72,72 +73,92 @@ void switch_task(bool reschedule) {
 
     thread = this_cpu->current_thread;
     struct thread *next;
-    ir_status_t status = linked_list_remove(&run_queue, 0, (void**)&next);
+    bool try_again = true;
+    // If the previous thread was terminating try scheduling the next one
+    while (try_again) {
+        try_again = false;
+        ir_status_t status = linked_list_remove(&run_queue, 0, (void**)&next);
 
-    // Retrieve and run the next thread
-    if (status == IR_OK) {
-        struct process *process = (struct process*)next->object.parent;
-        arch_mmu_set_address_space(&process->address_space);
-        arch_set_interrupt_stack(next->kernel_stack_top);
-        this_cpu->current_thread = next;
-        if (reschedule && thread != this_cpu->idle_thread) {
-            linked_list_add(&run_queue, thread);
+        // Retrieve and run the next thread
+        if (status == IR_OK) {
+            // Terminating threads are allowed to finish syscalls, but will end as soon as they are done.
+            // This is done to avoid leaving the kernel in an undefined state
+            if (next->state == ACTIVE || next->in_syscall) {
+                struct process *process = (struct process*)next->object.parent;
+                this_cpu->current_thread = next;
+                if (reschedule && thread != this_cpu->idle_thread) {
+                    linked_list_add(&run_queue, thread);
+                }
+
+                arch_mmu_set_address_space(&process->address_space);
+                arch_set_interrupt_stack(next->kernel_stack_top);
+                arch_enter_context(&next->context);
+            } else {
+                thread_finish_termination(next);
+                try_again = true;
+            }
         }
-        else if (reschedule){
-            debug_print("Leaving idle thread\n");
+        else if (thread != this_cpu->idle_thread) {
+            debug_print("No other threads, entering idle\n");
+            if (reschedule) {
+                linked_list_add(&run_queue, thread);
+            }
+            this_cpu->current_thread = this_cpu->idle_thread;
+            arch_set_interrupt_stack(this_cpu->idle_thread->kernel_stack_top);
+            arch_mmu_enter_kernel_address_space();
+
+            arch_enter_context(&this_cpu->idle_thread->context);
         }
-
-        //arch_exit_critical();
-        arch_enter_context(&next->context);
     }
-    else if (!reschedule || thread == this_cpu->idle_thread) {
-        debug_print("No other threads, entering idle\n");
-        linked_list_add(&run_queue, thread);
-        this_cpu->current_thread = this_cpu->idle_thread;
-        arch_set_interrupt_stack(this_cpu->idle_thread->kernel_stack_top);
-        arch_mmu_enter_kernel_address_space();
-
-        //arch_exit_critical();
-
-        arch_enter_context(&this_cpu->idle_thread->context);
-    }
-
-    debug_print("No other threads, resuming current\n");
-
+    // No other threads to run, continue what we were already doing
 }
 
 void schedule_thread(struct thread *thread) {
     if (!thread) {
         debug_printf("Scheduled a NULL pointer!!\n");
-        struct registers context;
-        arch_save_context(&context);
-        panic(&context, -1, "Scheduling NULL task\n");
+        panic(NULL, -1, "Scheduling NULL task\n");
     }
+    if (thread->state == TERMINATED) {
+        debug_printf("Scheduled a terminated thread!!\n");
+        panic(NULL, -1, "Scheduled a terminated thread\n");
+    }
+
     linked_list_add(&run_queue, thread);
 }
 
 /// @brief Block a thread until a signal is set
 /// @param listener The listener describing the signals that unblock the thread
-void scheduler_block_listener_and_switch(struct signal_listener *listener) {
+/// TODO: status return is here because arch_leave_function returns IR_OK, and
+/// the compiler should know the registers gets clobbered.
+ir_status_t scheduler_block_listener_and_switch(struct signal_listener *listener) {
+    // This thread won't be on the run queue since it is currently running
+    linked_list_add(&waiting_for_signals, listener);
+    this_cpu->current_thread->blocking_listener = listener;
 
-    // This most likely fails, because active threads are removed from the queue while running
-    linked_list_find_and_remove(&run_queue, listener->thread, NULL, NULL);
+    arch_save_context(&this_cpu->current_thread->context);
+    arch_set_instruction_pointer(&this_cpu->current_thread->context, (uintptr_t)arch_leave_function);
 
-    linked_list_add(&waiting_for_signals, listener->thread);
     switch_task(false);
+
+    // Dead code, given the modified return pointer
+    return IR_OK;
 }
 
 /// @brief Unblock a thread that is listening to object signals
 /// @param listener The thread's signal listener
 void scheduler_unblock_listener(struct signal_listener *listener) {
 
-    linked_list_find_and_remove(&waiting_for_signals, listener->thread, NULL, NULL);
+    debug_print("Listener unblocked\n");
+
+    linked_list_find_and_remove(&waiting_for_signals, listener, NULL, NULL);
 
     spinlock_aquire(listener->target->lock);
     linked_list_find_and_remove(&listener->target->signal_listeners, listener, NULL, NULL);
     spinlock_release(listener->target->lock);
 
+    listener->thread->blocking_listener = NULL;
     linked_list_add(&run_queue, listener->thread);
+    // Listener is freed by the unblocked process when it begins running again
 }
 
 /// @brief Put a thread to sleep and take it out of the run queue for a specific amount of time

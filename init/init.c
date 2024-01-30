@@ -3,6 +3,7 @@
 #include "iridium/types.h"
 #include "iridium/errors.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 const char keys[] = {
     [0x2] = '1',
@@ -171,6 +172,35 @@ void spawn_thread(void *entry_pointer)
     ir_handle_t thread;
     syscall_2(SYSCALL_THREAD_CREATE, THIS_PROCESS_HANDLE, (unsigned long)&thread);
     syscall_4(SYSCALL_THREAD_START, thread, (unsigned long)entry_pointer, stack_top, 0);
+}
+
+void spawn_thread_and_wait_for_exit(void *entry_pointer)
+{
+    ir_handle_t stack_vmo = 0xDEADDEAD;
+    ir_status_t status = vm_object_create(4096 * 8, VM_READABLE | VM_WRITABLE, &stack_vmo);
+    if (status) {
+        syscall_2(SYSCALL_SERIAL_OUT, (long)"Error %d Creating stack vmo\n", status);
+        syscall_1(SYSCALL_DEBUG_DUMP_HANDLES, 0);
+    }
+
+    uintptr_t stack_base = 0xDEADDEAD;
+    ir_handle_t region;
+    status = v_addr_region_map(ROOT_V_ADDR_REGION_HANDLE, stack_vmo, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE, &region, &stack_base);
+    if (status) {
+        syscall_2(SYSCALL_SERIAL_OUT, (long)"Error %d Mapping thread stack\n", status);
+        syscall_1(SYSCALL_DEBUG_DUMP_HANDLES, 0);
+    }
+
+    uintptr_t stack_top = stack_base + (4096 * 8) - 16;
+
+    ir_handle_t thread;
+    syscall_2(SYSCALL_THREAD_CREATE, THIS_PROCESS_HANDLE, (unsigned long)&thread);
+    syscall_4(SYSCALL_THREAD_START, thread, (unsigned long)entry_pointer, stack_top, 0);
+
+    ir_signal_t observed_signals = 0;
+    status = syscall_4(SYSCALL_OBJECT_WAIT, thread, THREAD_SIGNAL_TERMINATED, -1, (long)&observed_signals);
+
+    syscall_3(SYSCALL_SERIAL_OUT, (long)"Status %d from wait for thread termination - signals: %#x\n", status, observed_signals);
 }
 
 // 5 ports at vector 60
@@ -344,7 +374,6 @@ void keyboard_thread() {
     }
 }
 
-
 void thread_entry() {
 
     sys_print("Spawned new thread\n");
@@ -414,8 +443,16 @@ void sleeping_thread(void) {
 
 }
 
+void thread_that_kills_itself(void) {
+    // 1 second
+    syscall_1(SYSCALL_SLEEP_MICROSECONDS, 1000000);
+    syscall_1(SYSCALL_THREAD_EXIT, -1);
+}
+
 void _start(void) {
     sys_print("--------\nHello from the init process!\n--------\n");
+
+    spawn_thread_and_wait_for_exit(thread_that_kills_itself);
 
     ir_status_t status = get_framebuffer(&framebuffer_handle, &width, &height, &pitch, &bpp);
     if (status == IR_OK) {

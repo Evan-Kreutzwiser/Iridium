@@ -9,6 +9,8 @@
 #include "kernel/ioport.h"
 #include "kernel/handle.h"
 #include "kernel/heap.h"
+#include "kernel/main.h"
+#include "kernel/time.h"
 #include "kernel/arch/arch.h"
 #include "iridium/errors.h"
 
@@ -46,12 +48,12 @@ struct obj_functions functions[] = {
     [OBJECT_TYPE_PROCESS] = {
         .read = (object_read)(uintptr_t)object_missing_function,
         .write = (object_write)(uintptr_t)object_missing_function,
-        .cleanup = (object_cleanup)(uintptr_t)object_missing_function
+        .cleanup = (object_cleanup)(uintptr_t)process_cleanup
     },
     [OBJECT_TYPE_THREAD] = {
         .read = (object_read)(uintptr_t)object_missing_function,
         .write = (object_write)(uintptr_t)object_missing_function,
-        .cleanup = (object_cleanup)(uintptr_t)object_missing_function
+        .cleanup = (object_cleanup)(uintptr_t)thread_cleanup
     },
     [OBJECT_TYPE_INTERRUPT] = {
         .read = (object_read)(uintptr_t)object_missing_function,
@@ -70,6 +72,10 @@ struct obj_functions functions[] = {
 /// @warning Must have a lock on the object before calling
 /// @param obj An object which now has one less referrer
 void object_decrement_references(object* obj) {
+    if (obj->type == 0) {
+        debug_printf("Attempted to decrease references of invalid object %#p\n", obj);
+        panic(NULL, -1, "Attempted to decrease references of type 0 object (invalid)");
+    }
 
     obj->references--;
 
@@ -78,6 +84,7 @@ void object_decrement_references(object* obj) {
     }
 
     if (obj->references == 0) {
+        debug_printf("Releasing object of type %d\n", obj->type);
         spinlock_aquire(obj->lock);
         //debug_printf("Releasing unreferenced object of type %d @ %#p\n", obj->type, obj);
         // The object is no longer being used anywhere
@@ -104,7 +111,6 @@ void object_decrement_references(object* obj) {
 /// This should be used instead of directly setting the value of object->signals
 /// @note Call with a lock on `obj`
 void object_set_signals(object *obj, ir_signal_t signals) {
-
     obj->signals = signals;
 
     // TODO: Linked list iterator
@@ -112,7 +118,8 @@ void object_set_signals(object *obj, ir_signal_t signals) {
     uint i = 0;
     while (i < obj->signal_listeners.count) {
         struct signal_listener *listener;
-        linked_list_get(&obj->signal_listeners, i, (void**)&listener);
+        ir_status_t status = linked_list_get(&obj->signal_listeners, i, (void**)&listener);
+        if (status != IR_OK) { debug_printf("Failed to get item %d from listeners\n", i); while (1); }
         if (listener->target_signals & signals) {
             linked_list_remove(&obj->signal_listeners, i, NULL);
             listener->observed_signals = signals;
@@ -166,19 +173,46 @@ ir_status_t sys_object_wait(ir_handle_t object_handle, ir_signal_t target_signal
             return IR_ERROR_NO_MEMORY;
         }
 
+        listener->thread = this_cpu->current_thread;
+        listener->target = object;
+        listener->target_signals = target_signals;
+        listener->deadline = microseconds_since_boot + timeout_microseconds;
+
+        // TODO: Find better way to prevent overflows
+        // -1 means never expire
+        if (timeout_microseconds == -1) {
+            listener->deadline = -1;
+        }
+
+        // Keep the object alive, even in the even of another
+        // thread freeing the handle used to make the listener
+        object->references++;
+        linked_list_add(&object->signal_listeners, listener);
         spinlock_release(object->lock);
 
         // Block the task until one of the signals are asserted
         scheduler_block_listener_and_switch(listener);
+
         // This is not reached until either the signal is raised or the deadline is reached.
-        *observed_signals = listener->observed_signals;
+        ir_signal_t signals = listener->observed_signals;
+        *observed_signals = signals;
+
+        free(listener);
+
+        object_decrement_references(object);
+
         // If any of the target signals were raised
-        if (listener->observed_signals & target_signals) {
+        if (signals & target_signals) {
             return IR_OK;
         }
     }
     else {
         *observed_signals = object->signals;
+
+        // If any of the target signals were raised
+        if (object->signals & target_signals) {
+            return IR_OK;
+        }
     }
 
     return IR_ERROR_TIMED_OUT;

@@ -19,4 +19,8 @@ void init_kernel_address_space(address_space *addr_space);
 // Useful for modifying kernel mappings
 address_space *get_kernel_address_space(void);
 
+/// Switch to the kernel memory context, with no user thread
+/// NOTE: Clears this_cpu->current_thread
+void enter_kernel_context();
+
 #endif // KERNEL_MEMORY_VMEM_H_

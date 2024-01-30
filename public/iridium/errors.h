@@ -46,4 +46,7 @@
 /// @brief The operation did not complete before the deadline
 #define IR_ERROR_TIMED_OUT (-13)
 
+/// @brief A blocking operation was stopped before completing or timing out
+#define IR_ERROR_CANCLED (-14)
+
 #endif // PUBLIC_IRIDIUM_ERRORS_H_

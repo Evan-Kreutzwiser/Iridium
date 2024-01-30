@@ -272,7 +272,7 @@ ir_status_t v_addr_region_map_vm_object(struct v_addr_region *parent, uint64_t f
 /// (All attempted operations will fail if the region is destoryed).
 void v_addr_region_destroy(struct v_addr_region *region) {
     debug_printf("Destorying v_addr_region @ %#p\n", (uintptr_t)region);
-    debug_printf("Base: %#p, Length: %#zx\n", region->base, region->length);
+    debug_printf("Base: %#p, Length: %#zx, Parent: %#p\n", region->base, region->length, region->object.parent);
 
     if (linked_list_find_and_remove(&region->object.parent->children, region, compare_bases, NULL) != IR_OK) {
         debug_printf("Failed to remove region from parent!\n");
