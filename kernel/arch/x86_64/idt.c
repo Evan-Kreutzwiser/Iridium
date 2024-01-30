@@ -9,6 +9,7 @@
 #include "kernel/memory/physical_map.h"
 #include "kernel/memory/vmem.h"
 #include "kernel/main.h"
+#include "kernel/scheduler.h"
 #include "kernel/string.h"
 #include <stdbool.h>
 
@@ -120,15 +121,25 @@ void general_protection_fault(registers *context) {
     dump_context(context);
     print_stack_trace(context->rbp, context->rip);
 
-    char buffer[400];
-    sprintf(buffer, "General Protection Fault\n\n"
-            "Encountered a segmentation-related error at %#p.\n\n"
-            "%s\n"
-            "The segment selector, if applicable, is %#x.\n",
-            context->rip, cause, context->error_code
-        );
+    // If the kernel is accessing invalid memory we have no way to tell
+    // how bad the damage is or recover
+    if (context->cs == 0x8) {
+        char buffer[400];
+        sprintf(buffer, "General Protection Fault\n\n"
+                "Encountered a segmentation-related error at %#p.\n\n"
+                "%s\n"
+                "The segment selector, if applicable, is %#x.\n",
+                context->rip, cause, context->error_code
+            );
 
-    panic(context, 0xd, buffer);
+        panic(context, 0xd, buffer);
+    }
+    // User access violations are much less serious, and the offending thread can be ended
+    else {
+        this_cpu->current_thread->state = TERMINATING;
+        this_cpu->current_thread->exit_code = -1;
+        switch_task(true);
+    }
 }
 
 static bool is_in_page_fault = false;
@@ -177,16 +188,26 @@ void page_fault(registers *context) {
         paging_print_tables((page_table_entry*)p_addr_to_physical_map(cr3), accessed_address);
     }
 
-    char buffer[300];
-    sprintf(buffer, "Page fault\n\n"
-            "A paging related error was encountered at %#p in thread %d, with error code %#x.\n"
-            "%s-space tried to %s %#p in %s.\n",
-            context->rip, thread_id, (uint64_t)context->error_code,
-            ring, access_string, accessed_address, page
-        );
+    // If the kernel is accessing invalid memory we have no way to tell
+    // how bad the damage is or recover
+    if (context->cs == 0x8) {
+        char buffer[300];
+        sprintf(buffer, "Page fault\n\n"
+                "A paging related error was encountered at %#p in thread %d, with error code %#x.\n"
+                "%s-space tried to %s %#p in %s.\n",
+                context->rip, thread_id, (uint64_t)context->error_code,
+                ring, access_string, accessed_address, page
+            );
 
 
-    panic(context, 0xe, buffer);
+        panic(context, 0xe, buffer);
+    }
+    // User access violations are much less serious, and the offending thread can be ended
+    else {
+        this_cpu->current_thread->state = TERMINATING;
+        this_cpu->current_thread->exit_code = -1;
+        switch_task(true);
+    }
 }
 
 void interrupt_handler(registers context) {

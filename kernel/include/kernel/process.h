@@ -91,7 +91,7 @@ struct thread *create_idle_thread(void);
 
 ir_status_t task_create(struct task *parent);
 ir_status_t process_create(struct process **process_out, struct v_addr_region **virtual_address_space_out);
-ir_status_t thread_create(struct process *init_process, struct thread **out);
+ir_status_t thread_create(struct process *parent_process, struct thread **out);
 
 
 ir_status_t thread_start(struct thread *thread, uintptr_t entry, uintptr_t stack_top, uint64_t arg0);
