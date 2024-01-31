@@ -155,16 +155,18 @@ void spawn_thread(void *entry_pointer)
     ir_handle_t stack_vmo = 0xDEADDEAD;
     ir_status_t status = vm_object_create(4096 * 8, VM_READABLE | VM_WRITABLE, &stack_vmo);
     if (status) {
-        syscall_2(SYSCALL_SERIAL_OUT, (long)"Error %d Creating stack vmo\n", status);
+        syscall_2(SYSCALL_SERIAL_OUT, (long)"Error %d Creating stack vmo - failed to spawn thread\n", status);
         syscall_1(SYSCALL_DEBUG_DUMP_HANDLES, 0);
+        return;
     }
 
     uintptr_t stack_base = 0xDEADDEAD;
     ir_handle_t region;
     status = v_addr_region_map(ROOT_V_ADDR_REGION_HANDLE, stack_vmo, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE, &region, &stack_base);
     if (status) {
-        syscall_2(SYSCALL_SERIAL_OUT, (long)"Error %d Mapping thread stack\n", status);
+        syscall_2(SYSCALL_SERIAL_OUT, (long)"Error %d Mapping thread stack - failed to spawn thread\n", status);
         syscall_1(SYSCALL_DEBUG_DUMP_HANDLES, 0);
+        return;
     }
 
     uintptr_t stack_top = stack_base + (4096 * 8) - 16;
@@ -223,7 +225,9 @@ long inportb(ir_handle_t ports, int offset) {
     return value;
 }
 
+/// Wait for the ps/2 controller to have a byte for us to read
 #define WAIT_FOR_OUTPUT_FULL() while(!(inportb(ps2_ports, STATUS_PORT_OFFSET) & 1))
+/// Wait for the ps/2 controller to be ready for additional input
 #define WAIT_FOR_INPUT_CLEAR() while(inportb(ps2_ports, STATUS_PORT_OFFSET) & 2)
 
 char keyboard_read() {
@@ -265,7 +269,8 @@ void keyboard_thread() {
 
     // Clear the input buffer (if applicable) by reading the port and discarding the value
     int s = inportb(ps2_ports, STATUS_PORT_OFFSET);
-    while (s & 2) {
+    while (s & 1) {
+        sys_print("Keyboard had data waiting\n");
         inportb(ps2_ports, DATA_PORT_OFFSET);
         s = inportb(ps2_ports, STATUS_PORT_OFFSET);
     }
@@ -325,6 +330,15 @@ void keyboard_thread() {
     outportb(ps2_ports, COMMAND_PORT_OFFSET, 0x60);
     WAIT_FOR_INPUT_CLEAR();
     outportb(ps2_ports, DATA_PORT_OFFSET, (value | 1 | (1 << 6)));
+
+    // Reset and self test
+    WAIT_FOR_INPUT_CLEAR();
+    outportb(ps2_ports, DATA_PORT_OFFSET, 0xFF);
+    WAIT_FOR_OUTPUT_FULL();
+    if (inportb(ps2_ports, DATA_PORT_OFFSET) != 0xFA) { sys_print("Keyboard didn't perform reset\n"); }
+    WAIT_FOR_OUTPUT_FULL();
+    value = inportb(ps2_ports, DATA_PORT_OFFSET);
+    if (inportb(ps2_ports, DATA_PORT_OFFSET) != 0xAA) { sys_print("Keyboard self test failed\n"); }
 
     ir_handle_t interrupt;
     status = syscall_3(SYSCALL_INTERRUPT_CREATE, 34, 1, (long)&interrupt);
