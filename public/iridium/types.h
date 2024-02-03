@@ -29,8 +29,9 @@
 #define OBJECT_TYPE_PROCESS 3
 #define OBJECT_TYPE_THREAD 4
 #define OBJECT_TYPE_TASK 5
-#define OBJECT_TYPE_INTERRUPT 6
-#define OBJECT_TYPE_IOPORT 7
+#define OBJECT_TYPE_CHANNEL 6
+#define OBJECT_TYPE_INTERRUPT 7
+#define OBJECT_TYPE_IOPORT 8
 
 #define V_ADDR_REGION_READABLE 0x1 // Can only be false if the target supports execute only pages
 #define V_ADDR_REGION_WRITABLE 0x2
@@ -57,6 +58,17 @@
 #define PROCESS_SIGNAL_TERMINATED 0x1
 /// Set when the thread exits
 #define THREAD_SIGNAL_TERMINATED 0x1
+
+/// There is data ready to be read from the channel
+#define CHANNEL_SIGNAL_DATA_WAITING 0x1
+/// There is a handle ready to be received from the channel
+#define CHANNEL_SIGNAL_HANDLE_WAITING 0x2
+/// The channel cannot take in more messages
+#define CHANNEL_SIGNAL_DATA_QUEUE_FULL 0x4
+/// The channel cannot take in any more handles
+#define CHANNEL_SIGNAL_HANDLE_QUEUE_FULL 0x8
+/// The other end of the channel is gone, and can no longer send or recieve messages
+#define CHANNEL_SIGNAL_PEER_DISCONNECTED 0x10
 
 /// @brief Return status of all system calls and many internal functions.
 /// A value of 0 (`IR_OK`) represents success, and error codes are negative values.

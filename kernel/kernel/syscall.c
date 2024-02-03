@@ -4,6 +4,7 @@
 
 #include "iridium/errors.h"
 #include "iridium/syscalls.h"
+#include "kernel/channel.h"
 #include "kernel/devices/framebuffer.h"
 #include "kernel/handle.h"
 #include "kernel/heap.h"
@@ -52,6 +53,9 @@ const syscall syscall_table[] = {
     [SYSCALL_INTERRUPT_WAIT] = (syscall)(uintptr_t)sys_interrupt_wait,
     [SYSCALL_INTERRUPT_ARM] = (syscall)(uintptr_t)sys_interrupt_arm,
     [SYSCALL_OBJECT_WAIT] = (syscall)(uintptr_t)sys_object_wait,
+    [SYSCALL_CHANNEL_CREATE] = (syscall)(uintptr_t)sys_channel_create,
+    [SYSCALL_CHANNEL_READ] = (syscall)(uintptr_t)sys_channel_read,
+    [SYSCALL_CHANNEL_WRITE] = (syscall)(uintptr_t)sys_channel_write,
 };
 
 uint syscall_count = sizeof(syscall_table) / sizeof(syscall);
