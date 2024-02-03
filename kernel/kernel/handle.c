@@ -31,7 +31,7 @@ int handle_by_id(void *data, void *target) {
 /// @brief Determine and claim the next valid handle ID
 /// @param process Owner of the handle the id will be given to
 /// @return A valid handle id for the process
-static ir_handle_t handle_get_next_id(struct process *process) {
+ir_handle_t handle_get_next_id(struct process *process) {
     ir_handle_t new_id = IR_HANDLE_INVALID;
     ir_status_t result = linked_list_remove(&process->free_handle_ids, 0, (void**)&new_id);
     if (result != IR_OK) {

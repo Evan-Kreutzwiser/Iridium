@@ -17,7 +17,7 @@ struct signal_listener {
 /// @brief Common component of all kernel objects
 typedef struct object {
     uint type;
-    uint references;
+    _Atomic uint references;
     struct object *parent;
     linked_list children;
     ir_signal_t signals;

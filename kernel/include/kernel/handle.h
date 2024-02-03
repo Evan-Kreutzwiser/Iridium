@@ -10,7 +10,7 @@
 ///
 /// Allows user processes to access kernel objects through id numbers
 struct handle {
-    long handle_id;
+    ir_handle_t handle_id;
     ir_rights_t rights; // The operations permitted on the refered object
     // Pointer to the object this is a handle for
     // Verify the type is correct before accessing!
@@ -24,6 +24,8 @@ int handle_by_id(void *data, void *target);
 
 ir_status_t handle_create(struct process *process, object *object, ir_rights_t rights, struct handle **handle);
 ir_status_t handle_copy(struct handle *original, ir_rights_t new_rights, uint new_id, struct handle **out);
+
+ir_handle_t handle_get_next_id(struct process *process);
 
 /// @brief SYSCALL_HANDLE_DUPLICATE
 ///
