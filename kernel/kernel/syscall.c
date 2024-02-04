@@ -40,6 +40,7 @@ const syscall syscall_table[] = {
     [SYSCALL_V_ADDR_REGION_MAP] = (syscall)(uintptr_t)sys_v_addr_region_map,
     [SYSCALL_V_ADDR_REGION_DESTROY] = (syscall)(uintptr_t)sys_v_addr_region_destroy,
     [SYSCALL_VM_OBJECT_CREATE] = (syscall)(uintptr_t)sys_vm_object_create,
+    [SYSCALL_VM_OBJECT_CREATE_PHYSICAL] = (syscall)(uintptr_t)sys_vm_object_create_physical,
     [SYSCALL_DEBUG_GET_FRAMEBUFFER] = (syscall)(uintptr_t)sys_framebuffer_get,
     [SYSCALL_DEBUG_DUMP_HANDLES] = (syscall)(uintptr_t)sys_handle_dump,
     [SYSCALL_THREAD_START] = (syscall)(uintptr_t)sys_thread_start,

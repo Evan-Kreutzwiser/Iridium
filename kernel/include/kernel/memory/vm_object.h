@@ -40,4 +40,7 @@ void vm_object_cleanup(vm_object *vm);
 /// @brief SYSCALL_VM_OBJECT_CREATE
 ir_status_t sys_vm_object_create(size_t size, uint64_t flags, ir_handle_t *handle);
 
+/// @brief SYSCALL_VM_OBJECT_CREATE_PHYSICAL
+ir_status_t sys_vm_object_create_physical(p_addr_t address, size_t size, ir_handle_t *handle_out);
+
 #endif // KERNEL_MEMORY_VM_OBJECT_H_

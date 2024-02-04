@@ -108,14 +108,14 @@ void vm_object_cleanup(vm_object *vm) {
 }
 
 /// @brief SYSCALL_VM_OBJECT_CREATE
-/// Creates a new vm_object
+/// Creates a new vm_object, allocating a region of memory that can be mapped into processes' address spaces.
+/// @see `sys_v_addr_region_map`
 /// @param size Bytes of memory to allocaate. Rounded upwards to a multiple of the system's page size
 /// @param flags Memory access flags
 /// @param handle Output parameter containing a handle for the `vm_object`
 /// @return `IR_OK` on success, or `IR_ERROR_NO_MEMORY` under out-of-memory conditions
 ir_status_t sys_vm_object_create(size_t size, uint64_t flags, ir_handle_t *handle_out) {
     if (!arch_validate_user_pointer(handle_out)) {
-        debug_printf("Invalid output pointer %#p passed to sys_vm_object_create\n", handle_out);
         return IR_ERROR_INVALID_ARGUMENTS;
     }
 
@@ -136,11 +136,46 @@ ir_status_t sys_vm_object_create(size_t size, uint64_t flags, ir_handle_t *handl
 
     status = handle_create(process, (object*)vm_object, rights, &object_handle);
     if (status != IR_OK) {
-        debug_printf("Error %d creating vmo handle\n", status);
         return status;
     }
 
-    debug_printf("VMO handle created! id = %ld, object = %#p\n", object_handle->handle_id, object_handle->object);
+    status = linked_list_add(&process->handle_table, object_handle);
+    if (status != IR_OK) { return status; }
+
+    *handle_out = object_handle->handle_id;
+    return IR_OK;
+}
+
+/// @brief SYSCALL_VM_OBJECT_CREATE_PHYSICAL
+/// Creates a new vm_object representing a specific portion of the physical address space, typically MMIO ranges.
+/// @see `sys_v_addr_region_map`
+/// @param address Base physical address of the memory to be allocated
+/// @param size Bytes of memory to allocaate. Rounded upwards to a multiple of the system's page size
+/// @param handle Output parameter containing a handle for the `vm_object`
+/// @return `IR_OK` on success, or `IR_ERROR_NO_MEMORY` under out-of-memory conditions or
+///         if the target region of memory is already allocated
+ir_status_t sys_vm_object_create_physical(p_addr_t address, size_t size, ir_handle_t *handle_out) {
+    if (!arch_validate_user_pointer(handle_out)) {
+        return IR_ERROR_INVALID_ARGUMENTS;
+    }
+
+    struct process *process = (struct process*)this_cpu->current_thread->object.parent;
+    // This does not have to obtain the handle table lock because it does not access
+    // any of the process's objects or remove handles, which means it will not
+    // interfere with other system calls
+
+    vm_object *vm_object;
+    ir_status_t status = vm_object_create_physical(address, size, VM_MMIO_FLAGS, &vm_object);
+    if (status != IR_OK) return status;
+
+    struct handle *object_handle;
+    // TODO: Is there a use case for transfering or sharing physical memory regions?
+    ir_rights_t rights = IR_RIGHT_MAP | IR_RIGHT_READ | IR_RIGHT_WRITE;
+
+    status = handle_create(process, (object*)vm_object, rights, &object_handle);
+    if (status != IR_OK) {
+        return status;
+    }
 
     status = linked_list_add(&process->handle_table, object_handle);
     if (status != IR_OK) { return status; }
