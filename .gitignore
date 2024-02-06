@@ -2,6 +2,7 @@
 # Build files
 *.o
 *.d
+*.a
 *.sys
 *.img
 
