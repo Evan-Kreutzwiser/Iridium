@@ -132,7 +132,7 @@ ir_status_t sys_channel_create(ir_handle_t *channel_out, ir_handle_t *peer_out) 
 /// @return `IR_OK on success`, or an error code. `handles_count` and `message_length` are still written
 ///         in the event of an `IR_ERROR_BUFFER_TOO_SMALL` error, indicating how large the caller should
 ///         make `buffer` before trying again.
-ir_status_t sys_channel_read(ir_handle_t channel, char *buffer, size_t buffer_length, ir_handle_t *handles_count, size_t *message_length) {
+ir_status_t sys_channel_read(ir_handle_t channel, char *buffer, size_t buffer_length, size_t *handles_count, size_t *message_length) {
     if (!arch_validate_user_pointer(buffer) || !arch_validate_user_pointer(handles_count) || !arch_validate_user_pointer(message_length)) {
         return IR_ERROR_INVALID_ARGUMENTS;
     }
