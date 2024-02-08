@@ -33,12 +33,18 @@ void _start(void) {
             _set_fs_channel(*(ir_handle_t*)buffer);
         }
         // Allow argument passing to main() by prefixing a string with "arg"
-        else if (strncmp(char_data, "arg", 3)) {
+        else if (strncmp(char_data, "arg", 3) == 0) {
             argc++;
             argv = realloc(argv, sizeof(void*) * argc);
-            char *data = malloc(message_length);
+            char *data = malloc(message_length - 3);
+            memcpy(data, char_data + 3, message_length - 3);
             argv[argc] = NULL;
             argv[argc-1] = data;
+        }
+        // Special message that leaves any subsequent messages in the channel's queue for
+        // the process to read once main is called (Since string argv can't contain handles)
+        else if (strcmp(char_data, "start") == 0) {
+            break;
         }
         _syscall_2(SYSCALL_SERIAL_OUT, (long)"status = %d\n", (long)status);
         if (status == IR_ERROR_WRONG_TYPE) {
