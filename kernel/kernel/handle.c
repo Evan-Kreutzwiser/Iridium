@@ -87,11 +87,11 @@ ir_status_t handle_copy(struct handle *original, ir_rights_t new_rights, uint ne
 
 /// @brief SYSCALL_HANDLE_DUPLICATE
 ///
-/// Creates a new copy of a handle with the given rights, and returns the id in `id_out` (in user memory)
-int64_t sys_handle_duplicate(long original_id, ir_rights_t new_rights, ir_handle_t *id_out) {
+/// Creates a new copy of a handle with the given rights, and returns the id in `new_handle_out` (in user memory)
+ir_status_t sys_handle_duplicate(ir_handle_t handle, ir_rights_t new_rights, ir_handle_t *new_handle_out) {
     // As long as the pointer is in userspace its ok
     // Anything else wrong is a logic error and can just crash that process
-    if (!arch_validate_user_pointer(id_out)) return IR_ERROR_INVALID_ARGUMENTS;
+    if (!arch_validate_user_pointer(new_handle_out)) return IR_ERROR_INVALID_ARGUMENTS;
 
     // Obtain exclusive access over the process's handle table to avoid other
     // threads deleting the handle out from under us
@@ -99,7 +99,7 @@ int64_t sys_handle_duplicate(long original_id, ir_rights_t new_rights, ir_handle
     spinlock_aquire(process->handle_table_lock);
 
     struct handle *handle_ptr;
-    ir_status_t result = linked_list_find(&process->handle_table, &original_id, handle_by_id, NULL, (void**)&handle_ptr);
+    ir_status_t result = linked_list_find(&process->handle_table, &handle, handle_by_id, NULL, (void**)&handle_ptr);
 
     if (result != IR_OK) {
         spinlock_release(process->handle_table_lock);
@@ -118,7 +118,7 @@ int64_t sys_handle_duplicate(long original_id, ir_rights_t new_rights, ir_handle
     spinlock_release(process->handle_table_lock);
 
     // Give the id the userspace (If it faults accessing this, it is safe to kill the process now)
-    *id_out = new_handle_id;
+    *new_handle_out = new_handle_id;
     return IR_OK;
 }
 
@@ -126,11 +126,11 @@ int64_t sys_handle_duplicate(long original_id, ir_rights_t new_rights, ir_handle
 /// Replace a handle with a new one that has a subset of the original's rights.
 /// @param handle Handle ID to replace. This handle is invalidated after calling.
 /// @param new_rights Requested rights for the new handle. Must be a subset of the original handle's rights
-/// @param new_handle Output parameter set to the new handle
-/// @return `IR_OK` on success, and new_handle contains a valid id. Otherwise returns a negative error code
+/// @param new_handle_out Output parameter set to the id of the copy
+/// @return `IR_OK` on success, and `new_handle_out` contains a valid id. Otherwise returns a negative error code
 ///         and the given handle remains valid.
-ir_status_t sys_handle_replace(ir_handle_t handle, ir_rights_t new_rights, ir_handle_t *new_handle) {
-    if (!arch_validate_user_pointer(new_handle)) return IR_ERROR_INVALID_ARGUMENTS;
+ir_status_t sys_handle_replace(ir_handle_t handle, ir_rights_t new_rights, ir_handle_t *new_handle_out) {
+    if (!arch_validate_user_pointer(new_handle_out)) return IR_ERROR_INVALID_ARGUMENTS;
 
     // Obtain exclusive access over the process's handle table to avoid other
     // threads deleting the handle out from under us

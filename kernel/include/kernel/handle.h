@@ -30,10 +30,10 @@ ir_handle_t handle_get_next_id(struct process *process);
 /// @brief SYSCALL_HANDLE_DUPLICATE
 ///
 /// Creates a new copy of a handle with the given rights, and returns the id in `id_out` (in user memory)
-int64_t sys_handle_duplicate(long original_id, ir_rights_t new_rights, ir_handle_t *id_out);
+ir_status_t sys_handle_duplicate(ir_handle_t handle, ir_rights_t new_rights, ir_handle_t *new_handle_out);
 
 /// @brief SYSCALL_HANDLE_REPLACE
-ir_status_t sys_handle_replace(ir_handle_t handle, ir_rights_t new_rights, ir_handle_t *new_handle);
+ir_status_t sys_handle_replace(ir_handle_t handle, ir_rights_t new_rights, ir_handle_t *new_handle_out);
 
 /// @brief SYSCALL_HANDLE_CLOSE
 /// Close one of the current process's handles
