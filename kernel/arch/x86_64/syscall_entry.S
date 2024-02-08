@@ -18,22 +18,20 @@ syscall_entry:
     // It is safe to just load the top of the stack as the pointer
     // because whenever user code is running in this thread it
     // should be completely empty.
-    movq %gs:0, %rbx // Load current thread pointer from this_cpu
-    // Check offsets
-    movq 0x78(%rbx), %rsp // Get kernel stack from thread control block
+
+    // Load current thread pointer from this_cpu->current_thread
+    // rbx and r12-15 are callee preserved, so we cannot modify them without a stack to save to.
+    // With the other registers being used for arguments and syscall/sysret bookkeeping the
+    // only available option is rsp
+    movq %gs:0, %rsp
+    // Check offsets if object or thread structs change
+    movq 0x78(%rsp), %rsp // Get kernel stack from thread control block
 
     push %rax
     push %rcx
     push %r11
 
     push %rbp
-
-    // ABI requires that functions preverse certain registers
-    push %r15
-    push %r14
-    push %r13
-    push %r12
-    push %rbx
 
     mov %r10, %rcx
 
@@ -43,15 +41,9 @@ syscall_entry:
     call syscall_handler
     // %rax holds the return value
 
-    pop %rbx
-    pop %r12
-    pop %r13
-    pop %r14
-    pop %r15
-
     pop %rbp
 
-        // Avoid being interrupted while having the user GS base in kernel code,
+    // Avoid being interrupted while having the user GS base in kernel code,
     // Since interrupt handlers use CS to determine whether to use swapgs again
     // Interrupts will be enabled during the return to userspace
     cli
