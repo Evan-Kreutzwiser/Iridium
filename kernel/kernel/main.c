@@ -50,7 +50,8 @@ void kernel_main(v_addr_t initrd_start_address) {
     // Start the init process
     struct process *init_process;
     struct v_addr_region *address_space;
-    process_create(&init_process, &address_space);
+    struct channel *channel;
+    process_create(&init_process, &address_space, &channel);
 
     Elf64_Ehdr *header = (Elf64_Ehdr*)initrd_start_address;
 
