@@ -1,68 +1,49 @@
 
 #include "kernel/object.h"
 
-#include "kernel/memory/v_addr_region.h"
-#include "kernel/memory/vm_object.h"
-#include "kernel/interrupt.h"
-#include "kernel/scheduler.h"
-#include "kernel/process.h"
-#include "kernel/ioport.h"
+#include "iridium/errors.h"
+#include "kernel/arch/arch.h"
+#include "kernel/channel.h"
 #include "kernel/handle.h"
 #include "kernel/heap.h"
+#include "kernel/interrupt.h"
+#include "kernel/ioport.h"
 #include "kernel/main.h"
+#include "kernel/memory/v_addr_region.h"
+#include "kernel/memory/vm_object.h"
+#include "kernel/process.h"
+#include "kernel/scheduler.h"
 #include "kernel/time.h"
-#include "kernel/arch/arch.h"
-#include "iridium/errors.h"
 
 #include "arch/debug.h"
 
 /// @brief Functions for operating on a type of object
-/// TODO: Only cleanup function is actually used
+/// TODO: Only cleanup function is actually used.
+///       Possibly add a generic object info getter?
 struct obj_functions {
-    object_read read;
-    object_write write;
     object_cleanup cleanup;
 };
 
-
-/// @brief Funciton used in the place of missing object functions
-///
-/// Always returns `IR_ERROR_UNSUPPORTED` because the function to
-/// perform the operation on this type of object does not exist.
-/// @return `IR_ERROR_UNSUPPORTED`
-static ir_status_t object_missing_function() {
-    return IR_ERROR_UNSUPPORTED;
-}
-
 struct obj_functions functions[] = {
     [OBJECT_TYPE_V_ADDR_REGION] = {
-        .read = (object_read)(uintptr_t)object_missing_function,
-        .write = (object_write)(uintptr_t)object_missing_function,
         .cleanup = (object_cleanup)(uintptr_t)v_addr_region_cleanup
     },
     [OBJECT_TYPE_VM_OBJECT] = {
-        .read = (object_read)(uintptr_t)object_missing_function,
-        .write = (object_write)(uintptr_t)object_missing_function,
         .cleanup = (object_cleanup)(uintptr_t)vm_object_cleanup
     },
     [OBJECT_TYPE_PROCESS] = {
-        .read = (object_read)(uintptr_t)object_missing_function,
-        .write = (object_write)(uintptr_t)object_missing_function,
         .cleanup = (object_cleanup)(uintptr_t)process_cleanup
     },
     [OBJECT_TYPE_THREAD] = {
-        .read = (object_read)(uintptr_t)object_missing_function,
-        .write = (object_write)(uintptr_t)object_missing_function,
         .cleanup = (object_cleanup)(uintptr_t)thread_cleanup
     },
+    [OBJECT_TYPE_CHANNEL] = {
+        .cleanup = (object_cleanup)(uintptr_t)channel_cleanup
+    },
     [OBJECT_TYPE_INTERRUPT] = {
-        .read = (object_read)(uintptr_t)object_missing_function,
-        .write = (object_write)(uintptr_t)object_missing_function,
         .cleanup = (object_cleanup)(uintptr_t)interrupt_cleanup
     },
     [OBJECT_TYPE_IOPORT] = {
-        .read = (object_read)(uintptr_t)object_missing_function,
-        .write = (object_write)(uintptr_t)object_missing_function,
         .cleanup = (object_cleanup)(uintptr_t)ioport_cleanup
     }
 };

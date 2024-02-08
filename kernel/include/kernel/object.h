@@ -26,8 +26,6 @@ typedef struct object {
     lock_t lock;
 } object;
 
-typedef ir_status_t (*object_read)(object* obj, void *buffer, size_t length, size_t offset);
-typedef ir_status_t (*object_write)(object* obj, void *buffer, size_t length, size_t offset);
 typedef void (*object_cleanup)(object* obj); // Frees an object
 
 /// @brief Update an object's signals and trigger connected listeners if applicable

@@ -73,11 +73,9 @@ ir_status_t channel_write(struct channel *destination, char *message, size_t mes
 void channel_cleanup(struct channel *channel) {
     if (channel->peer) {
         spinlock_aquire(channel->peer->object.lock);
-
         object_set_signals(&channel->peer->object, channel->peer->object.signals | CHANNEL_SIGNAL_PEER_DISCONNECTED);
-        channel->peer = NULL;
-
         spinlock_release(channel->peer->object.lock);
+        channel->peer = NULL;
     }
 
     struct channel_message *message;
