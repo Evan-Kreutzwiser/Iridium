@@ -3,6 +3,7 @@
 
 #include "kernel/process.h"
 #include "kernel/cpu_locals.h"
+#include "kernel/channel.h"
 #include "kernel/handle.h"
 #include "kernel/scheduler.h"
 #include "kernel/memory/v_addr_region.h"
@@ -72,36 +73,48 @@ struct thread* create_idle_thread() {
 /// @note The process begins with 2 handles: Itself, and its root v_addr_region.
 /// @param process_out Output parameter set to the newly created process object
 /// @param virtual_address_space_out Output parameter set to the process's root `v_addr_region`
+/// @param channel_out Output parameter providing a channel for passing arguments and additional handles
 /// @return `IR_OK` on success, or `IR_ERROR_NOMEMORY` under out-of-memory conditions
-ir_status_t process_create(struct process **process_out, struct v_addr_region **virtual_address_space_out) {
+ir_status_t process_create(struct process **process_out, struct v_addr_region **virtual_address_space_out, struct channel **channel_out) {
 
     struct process *process = calloc(1, sizeof(struct process));
     process->object.type = OBJECT_TYPE_PROCESS;
+    struct channel *channel, *channel_peer;
+
     ir_status_t status = arch_mmu_create_address_space(&process->address_space);
     if (status != IR_OK) {
         free(process);
         return status;
     }
-    status = v_addr_region_create_root(&process->address_space, 0, USER_MEMORY_LENGTH, &process->root_v_addr_region);
+    status = channel_create(&channel, &channel_peer);
     if (status != IR_OK) {
         free(process);
         return status;
     }
 
-    debug_printf("Process created at %#p, root v_addr_region at %#p\n", process, process->root_v_addr_region);
+    status = v_addr_region_create_root(&process->address_space, 0, USER_MEMORY_LENGTH, &process->root_v_addr_region);
+    if (status != IR_OK) {
+        free(process);
+        free(channel);
+        free(channel_peer);
+        return status;
+    }
 
-    // Each process's first 2 handles are for their own process and address space
-    struct handle* process_handle;
-    struct handle* v_addr_region_handle;
+    // Each process's first 3 handles are for their own process and address space,
+    // and a channel for passing arguments
+    struct handle *process_handle;
+    struct handle *v_addr_region_handle;
+    struct handle *channel_handle;
     handle_create(process, (object*)process, IR_RIGHT_ALL, &process_handle);
     handle_create(process, (object*)process->root_v_addr_region, IR_RIGHT_ALL, &v_addr_region_handle);
+    handle_create(process, (object*)channel_peer, IR_RIGHT_ALL, &channel_handle);
     linked_list_add(&process->handle_table, process_handle);
     linked_list_add(&process->handle_table, v_addr_region_handle);
-
-    debug_printf("Process handle id is %ld, root region handle id is %ld\n", process_handle->handle_id, v_addr_region_handle->handle_id);
+    linked_list_add(&process->handle_table, channel_handle);
 
     *process_out = process;
     *virtual_address_space_out = process->root_v_addr_region;
+    *channel_out = channel;
     return IR_OK;
 }
 
@@ -175,8 +188,9 @@ ir_status_t thread_start(struct thread *thread, uintptr_t entry, uintptr_t stack
 /// @brief SYSCALL_PROCESS_CREATE
 /// @param process Output parameter set to the new process's handle
 /// @param v_addr_region Output parameter giving access to the process's address space
+/// @param channel Output parameter providing a channel for passing arguments to the process
 /// @return On success, returns `IR_OK` and process and v_addr_region are valid handle ids.
-ir_status_t sys_process_create(ir_handle_t *process, ir_handle_t *v_addr_region) {
+ir_status_t sys_process_create(ir_handle_t *process, ir_handle_t *v_addr_region, ir_handle_t *channel) {
     if (!arch_validate_user_pointer(process) || !arch_validate_user_pointer(v_addr_region)) {
         return IR_ERROR_INVALID_ARGUMENTS;
     }
@@ -185,17 +199,23 @@ ir_status_t sys_process_create(ir_handle_t *process, ir_handle_t *v_addr_region)
 
     struct process *new_process;
     struct v_addr_region *root_region;
-    process_create(&new_process, &root_region);
-    struct handle* process_handle;
-    struct handle* v_addr_region_handle;
+    struct channel *startup_channel;
+    process_create(&new_process, &root_region, &startup_channel);
+
+    struct handle *process_handle;
+    struct handle *v_addr_region_handle;
+    struct handle *channel_handle;
     handle_create(current_process, (object*)process, IR_RIGHT_ALL, &process_handle);
     handle_create(current_process, (object*)root_region, IR_RIGHT_ALL, &v_addr_region_handle);
+    handle_create(current_process, (object*)startup_channel, IR_RIGHT_ALL, &channel_handle);
 
     linked_list_add(&current_process->handle_table, process_handle);
     linked_list_add(&current_process->handle_table, v_addr_region_handle);
+    linked_list_add(&current_process->handle_table, channel_handle);
 
     *process = process_handle->handle_id;
     *v_addr_region = v_addr_region_handle->handle_id;
+    *channel = channel_handle->handle_id;
     return IR_OK;
 }
 

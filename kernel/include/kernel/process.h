@@ -82,6 +82,9 @@ struct thread {
     int thread_id;
 };
 
+/// @see `kernel/channel.h`
+struct channel;
+
 extern struct process* idle_process;
 
 void create_idle_process(void);
@@ -90,7 +93,7 @@ void create_idle_process(void);
 struct thread *create_idle_thread(void);
 
 ir_status_t task_create(struct task *parent);
-ir_status_t process_create(struct process **process_out, struct v_addr_region **virtual_address_space_out);
+ir_status_t process_create(struct process **process_out, struct v_addr_region **virtual_address_space_out, struct channel **channel_out);
 ir_status_t thread_create(struct process *parent_process, struct thread **out);
 
 
@@ -112,7 +115,7 @@ void process_cleanup(struct process *process);
 void thread_cleanup(struct thread *thread);
 
 /// SYSCALL_PROCESS_CREATE
-ir_status_t sys_process_create(ir_handle_t *process, ir_handle_t *v_addr_region);
+ir_status_t sys_process_create(ir_handle_t *process, ir_handle_t *v_addr_region, ir_handle_t *channel);
 
 /// SYSCALL_THREAD_CREATE
 ir_status_t sys_thread_create(ir_handle_t parent_process, ir_handle_t *out);

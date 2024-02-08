@@ -384,7 +384,9 @@ void keyboard_thread() {
             value = inportb(ps2_ports, DATA_PORT_OFFSET);
             if (value == 0x38) {
                 sys_print("\nEnding process.\n");
-                syscall_1(SYSCALL_PROCESS_EXIT, -4);
+
+                extern void exit(int);
+                exit(-4);
             }
 
             syscall_2(SYSCALL_SERIAL_OUT, (long)"%c", keys[value]);
@@ -468,7 +470,7 @@ void thread_that_exits(void) {
     syscall_1(SYSCALL_THREAD_EXIT, -1);
 }
 
-void _start(void) {
+int main(void) {
     sys_print("--------\nHello from the init process!\n--------\nWaiting for test thread to exit...\n");
 
     spawn_thread_and_wait_for_exit(thread_that_exits);

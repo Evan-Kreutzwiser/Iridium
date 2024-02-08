@@ -8,6 +8,7 @@
 #define IR_HANDLE_INVALID 0
 #define THIS_PROCESS_HANDLE 1
 #define ROOT_V_ADDR_REGION_HANDLE 2
+#define STARTUP_CHANNEL_HANDLE 3
 
 
 // Handle rights
