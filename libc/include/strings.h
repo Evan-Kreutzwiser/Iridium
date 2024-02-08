@@ -38,7 +38,7 @@ static inline int ffs(int i) {
     if (i == 0) return 0;
 
     int b = 1;
-    while (i & 1 == 0) {
+    while ((i & 1) == 0) {
         b++;
         i >>= 1;
     }
