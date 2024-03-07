@@ -7,9 +7,11 @@
 
 void _start(void) {
 
-    char **argv = malloc(sizeof(void*));
-    argv[0] = NULL;
-    int argc = 0;
+    char **argv = malloc(sizeof(void*) * 2);
+    // Provide a blank program name
+    argv[0] = "";
+    argv[1] = NULL;
+    int argc = 1;
 
     void *buffer = malloc(128);
     size_t buffer_length = 128;
@@ -40,6 +42,12 @@ void _start(void) {
             memcpy(data, char_data + 3, message_length - 3);
             argv[argc] = NULL;
             argv[argc-1] = data;
+        }
+        // Allow providing an executable name for argv[0]
+        else if (strncmp(char_data, "name", 4) == 0) {
+            char *data = malloc(message_length - 4);
+            memcpy(data, char_data + 4, message_length - 4);
+            argv[0] = data;
         }
         // Special message that leaves any subsequent messages in the channel's queue for
         // the process to read once main is called (Since string argv can't contain handles)

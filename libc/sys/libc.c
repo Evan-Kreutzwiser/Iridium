@@ -8,6 +8,6 @@
 // stack smashing this is called to terminate the program
 void __stack_chk_fail(void) {
     // TODO: printf an error message
-    _syscall_1(SYSCALL_SERIAL_OUT, "Stack smashing detected, exiting\n");
-    exit(1);
+    _syscall_1(SYSCALL_SERIAL_OUT, (long)"Stack smashing detected, exiting\n");
+    _Exit(1); // Don't call atexit functions
 }
