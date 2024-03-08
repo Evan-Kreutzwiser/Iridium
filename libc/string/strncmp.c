@@ -9,6 +9,8 @@ int strncmp(const char *str1, const char *str2, size_t n) {
         s2++;
         n--;
     }
-
+    if (n == 0) {
+        return 0;
+    }
     return *s1 - *s2;
 }
