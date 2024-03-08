@@ -2,8 +2,15 @@
 #include "iridium/syscalls.h"
 #include "iridium/types.h"
 #include "iridium/errors.h"
+#include "sys/vm_object.h"
+#include "sys/interrupt.h"
+#include "sys/ioport.h"
+#include "sys/v_addr_region.h"
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 
 const char keys[] = {
     [0x2] = '1',
@@ -122,14 +129,6 @@ ir_status_t handle_close(ir_handle_t handle) {
     return syscall_1(SYSCALL_HANDLE_CLOSE, (long)handle);
 }
 
-ir_status_t v_addr_region_map(ir_handle_t parent, ir_handle_t vm_object, uint64_t flags, ir_handle_t *region_out, void *address_out) {
-    return syscall_5(SYSCALL_V_ADDR_REGION_MAP, parent, vm_object, flags, (long)region_out, (long)address_out);
-}
-
-ir_status_t vm_object_create(unsigned long size, uint64_t flags, ir_handle_t *out) {
-    return syscall_3(SYSCALL_VM_OBJECT_CREATE, size, flags, (long)out);
-}
-
 ir_status_t get_framebuffer(ir_handle_t *fb_handle, int *width, int *height, int *pitch, int *bpp) {
     return syscall_5(SYSCALL_DEBUG_GET_FRAMEBUFFER, (long)fb_handle, (long)width, (long)height, (long)pitch, (long)bpp);
 }
@@ -152,24 +151,24 @@ int wait() {
 
 void spawn_thread(void *entry_pointer)
 {
-    ir_handle_t stack_vmo = 0xDEADDEAD;
-    ir_status_t status = vm_object_create(4096 * 8, VM_READABLE | VM_WRITABLE, &stack_vmo);
+    ir_handle_t stack_vmo = IR_HANDLE_INVALID;
+    ir_status_t status = ir_vm_object_create(4096 * 8, VM_READABLE | VM_WRITABLE, &stack_vmo);
     if (status) {
         syscall_2(SYSCALL_SERIAL_OUT, (long)"Error %d Creating stack vmo - failed to spawn thread\n", status);
         syscall_1(SYSCALL_DEBUG_DUMP_HANDLES, 0);
         return;
     }
 
-    uintptr_t stack_base = 0xDEADDEAD;
+    void *stack_base = NULL;
     ir_handle_t region;
-    status = v_addr_region_map(ROOT_V_ADDR_REGION_HANDLE, stack_vmo, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE, &region, &stack_base);
+    status = ir_v_addr_region_map(ROOT_V_ADDR_REGION_HANDLE, stack_vmo, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE, &region, &stack_base);
     if (status) {
         syscall_2(SYSCALL_SERIAL_OUT, (long)"Error %d Mapping thread stack - failed to spawn thread\n", status);
         syscall_1(SYSCALL_DEBUG_DUMP_HANDLES, 0);
         return;
     }
 
-    uintptr_t stack_top = stack_base + (4096 * 8) - 16;
+    uintptr_t stack_top = (uintptr_t)stack_base + (4096 * 8) - 16;
 
     ir_handle_t thread;
     syscall_2(SYSCALL_THREAD_CREATE, THIS_PROCESS_HANDLE, (unsigned long)&thread);
@@ -178,22 +177,22 @@ void spawn_thread(void *entry_pointer)
 
 void spawn_thread_and_wait_for_exit(void *entry_pointer)
 {
-    ir_handle_t stack_vmo = 0xDEADDEAD;
-    ir_status_t status = vm_object_create(4096 * 8, VM_READABLE | VM_WRITABLE, &stack_vmo);
+    ir_handle_t stack_vmo = IR_HANDLE_INVALID;
+    ir_status_t status = ir_vm_object_create(4096 * 8, VM_READABLE | VM_WRITABLE, &stack_vmo);
     if (status) {
         syscall_2(SYSCALL_SERIAL_OUT, (long)"Error %d Creating stack vmo\n", status);
         syscall_1(SYSCALL_DEBUG_DUMP_HANDLES, 0);
     }
 
-    uintptr_t stack_base = 0xDEADDEAD;
+    void *stack_base = NULL;
     ir_handle_t region;
-    status = v_addr_region_map(ROOT_V_ADDR_REGION_HANDLE, stack_vmo, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE, &region, &stack_base);
+    status = ir_v_addr_region_map(ROOT_V_ADDR_REGION_HANDLE, stack_vmo, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE, &region, &stack_base);
     if (status) {
         syscall_2(SYSCALL_SERIAL_OUT, (long)"Error %d Mapping thread stack\n", status);
         syscall_1(SYSCALL_DEBUG_DUMP_HANDLES, 0);
     }
 
-    uintptr_t stack_top = stack_base + (4096 * 8) - 16;
+    uintptr_t stack_top = (uintptr_t)stack_base + (4096 * 8) - 16;
 
     ir_handle_t thread;
     syscall_2(SYSCALL_THREAD_CREATE, THIS_PROCESS_HANDLE, (unsigned long)&thread);
@@ -211,17 +210,13 @@ ir_handle_t ps2_ports;
 #define COMMAND_PORT_OFFSET 4
 #define STATUS_PORT_OFFSET 4
 
-void outportb(ir_handle_t ports, int offset, unsigned char value) {
-    ir_status_t status = syscall_4(SYSCALL_IOPORT_SEND, ports, offset, value, SIZE_BYTE);
-    if (status)
-        syscall_3(SYSCALL_SERIAL_OUT, (long)"Error %d writing port offset %d\n", status, offset);
+static inline void outportb(ir_handle_t ports, int offset, unsigned char value) {
+    ir_ioport_send(ports, offset, value, SIZE_BYTE);
 }
 
-long inportb(ir_handle_t ports, int offset) {
+static inline long inportb(ir_handle_t ports, int offset) {
     long value = 0;
-    ir_status_t status = syscall_4(SYSCALL_IOPORT_RECEIVE, ports, offset, SIZE_BYTE, (long)&value);
-    if (status)
-        syscall_3(SYSCALL_SERIAL_OUT, (long)"Error %d reading port offset %d\n", status, offset);
+    ir_ioport_receive(ports, offset, SIZE_BYTE, &value);
     return value;
 }
 
@@ -254,7 +249,7 @@ void keyboard_thread() {
 
     bool is_dual_channel = true;
 
-    ir_status_t status = syscall_3(SYSCALL_IOPORT_CREATE, 0x60, 5, (long)&ps2_ports);
+    ir_status_t status = ir_ioport_create(0x60, 5, &ps2_ports);
     if (status) {
         syscall_2(SYSCALL_SERIAL_OUT, (long)"Error %d getting ports\n", status);
     }
@@ -270,7 +265,6 @@ void keyboard_thread() {
     // Clear the input buffer (if applicable) by reading the port and discarding the value
     int s = inportb(ps2_ports, STATUS_PORT_OFFSET);
     while (s & 1) {
-        sys_print("Keyboard had data waiting\n");
         inportb(ps2_ports, DATA_PORT_OFFSET);
         s = inportb(ps2_ports, STATUS_PORT_OFFSET);
     }
@@ -341,7 +335,7 @@ void keyboard_thread() {
     if (inportb(ps2_ports, DATA_PORT_OFFSET) != 0xAA) { sys_print("Keyboard self test failed\n"); }
 
     ir_handle_t interrupt;
-    status = syscall_3(SYSCALL_INTERRUPT_CREATE, 34, 1, (long)&interrupt);
+    status = ir_interrupt_create(34, 1, &interrupt);
     if (status) {
         syscall_2(SYSCALL_SERIAL_OUT, (long)"Error %d registering interrupt\n", status);
     }
@@ -385,8 +379,7 @@ void keyboard_thread() {
             if (value == 0x38) {
                 sys_print("\nEnding process.\n");
 
-                extern void exit(int);
-                exit(-4);
+                exit(4);
             }
 
             syscall_2(SYSCALL_SERIAL_OUT, (long)"%c", keys[value]);
@@ -398,10 +391,6 @@ void keyboard_thread() {
 void thread_entry() {
 
     sys_print("Spawned new thread\n");
-
-    //for (int i = 0; i < 64; i++) {
-        //syscall_1(SYSCALL_YIELD, 0);
-    //}
 
     int x = 0;
     while (1) {
@@ -470,14 +459,14 @@ void thread_that_exits(void) {
     syscall_1(SYSCALL_THREAD_EXIT, -1);
 }
 
-int main(void) {
-    sys_print("--------\nHello from the init process!\n--------\nWaiting for test thread to exit...\n");
+int main(int argc, char *argv[]) {
+    syscall_2(SYSCALL_SERIAL_OUT, (long)"--------\nHello from the init process! Process name: %s\n--------\nWaiting for test thread to exit...\n", (long)argv[0]);
 
     spawn_thread_and_wait_for_exit(thread_that_exits);
 
     ir_status_t status = get_framebuffer(&framebuffer_handle, &width, &height, &pitch, &bpp);
     if (status == IR_OK) {
-        status = v_addr_region_map(ROOT_V_ADDR_REGION_HANDLE, framebuffer_handle, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE, &region_handle, &framebuffer);
+        status = ir_v_addr_region_map(ROOT_V_ADDR_REGION_HANDLE, framebuffer_handle, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE, &region_handle, (void**)&framebuffer);
         if (status == IR_OK ) {
             syscall_2(SYSCALL_SERIAL_OUT, (long)"Framebuffer successfully mapped to %#p\n", (long)framebuffer);
             int position = pitch * 100 + (bpp/8 * 600);
