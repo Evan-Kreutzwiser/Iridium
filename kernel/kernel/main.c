@@ -7,6 +7,7 @@
 #include "iridium/errors.h"
 #include "kernel/arch/arch.h"
 #include "kernel/arch/mmu.h"
+#include "kernel/channel.h"
 #include "kernel/devices/framebuffer.h"
 #include "kernel/heap.h"
 #include "kernel/main.h"
@@ -122,6 +123,9 @@ void kernel_main(v_addr_t initrd_start_address) {
     if (status) {
         debug_printf("Error %d creating init thread\n", status);
     }
+
+    // Libc will put the program name "Init" in argv[0]
+    channel_write(channel->peer, "nameInit", 9, NULL, 0);
 
     debug_printf("Init process created: Entry point is %#p with stack %#p\n", header->e_entry, stack_address + (PAGE_SIZE * 256) -16);
     thread_start(thread, header->e_entry, stack_address + (PAGE_SIZE * 256) -16, 0);
