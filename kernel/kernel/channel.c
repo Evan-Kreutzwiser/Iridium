@@ -151,6 +151,7 @@ ir_status_t sys_channel_read(ir_handle_t channel, char *buffer, size_t buffer_le
 
     struct channel *channel_object = (struct channel*)channel_handle->object;
     spinlock_aquire(channel_handle->object->lock);
+    spinlock_release(process->handle_table_lock);
 
     struct channel_message *message;
     if (linked_list_get(&channel_object->message_queue, 0, (void**)&message) != IR_OK) {
@@ -180,6 +181,10 @@ ir_status_t sys_channel_read(ir_handle_t channel, char *buffer, size_t buffer_le
         ((ir_handle_t*)buffer)[i] = handle->handle_id;
     }
 
+    *handles_count = message->handle_count;
+    *message_length = message->message_length;
+
+    spinlock_release(channel_handle->object->lock);
     return IR_OK;
 }
 
