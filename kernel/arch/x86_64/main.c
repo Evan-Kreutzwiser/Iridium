@@ -342,8 +342,6 @@ void arch_main(p_addr_t multiboot_physical_addr) {
 
 void arch_set_cpu_local_pointer(struct per_cpu_data* cpu_local_data) {
     wrmsr(MSR_GS_BASE, (uint64_t)cpu_local_data);
-    wrmsr(MSR_KERNEL_GS_BASE, (uint64_t)cpu_local_data);
-    asm volatile ("swapgs");
 }
 
 
@@ -427,10 +425,18 @@ long arch_io_input(int port, int word_size) {
     return input;
 }
 
-void arch_initialize_thread_context(struct registers *context, bool is_kernel) {
-    context->cs = is_kernel ? 0x8  : 0x23;
-    context->ss = is_kernel ? 0x10 : 0x1b;
+void arch_initialize_thread_context(struct registers *context) {
+    context->cs = 0x23;
+    context->ss = 0x1b;
     context->rflags = 0x202; // Reserved bit (1) and interrupts enabled
+}
+
+void arch_initialize_idle_thread_context(struct registers *context) {
+    context->cs = 0x8;
+    context->ss = 0x10;
+    context->rflags = 0x202; // Reserved bit (1) and interrupts enabled
+    // Retain the cpu's local data pointer - swapgs won't run because this thread runs in kernel space
+    context->gs_base = rdmsr(MSR_GS_BASE);
 }
 
 struct stack_frame {

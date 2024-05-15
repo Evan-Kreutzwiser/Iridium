@@ -153,9 +153,12 @@ multiboot_trampoline_64:
     mov     $0x10, %rax
     mov     %ax, %ds
     mov     %ax, %es
+    mov     %ax, %ss
+    // IRETQ sets the descriptors to null, which on intel CPUs (but not AMD) also zeros the base address.
+    // Setting the segments to the null segment from the begining prevents this behavior.
+    mov     $0x0, %rax
     mov     %ax, %fs
     mov     %ax, %gs
-    mov     %ax, %ss
     // Loading the TSS segment will be dealt with once they can be properly allocated and set up
 
     // Finally setup a bootstrap stack to complete the C abi
@@ -243,8 +246,14 @@ multiboot_trampoline_64:
 .global arch_enter_context
 .type arch_enter_context, @function
 arch_enter_context:
-
     cli // Interrupts will be reenabled upon iret from the thread's rflags
+
+    movl 0xbc(%rdi), %edx
+    movl 0xb8(%rdi), %eax
+    movl $MSR_KERNEL_GS_BASE, %ecx
+    wrmsr
+    swapgs
+
     movq 0x8(%rdi), %rbx
     movq 0x10(%rdi), %rcx
     movq 0x18(%rdi), %rdx

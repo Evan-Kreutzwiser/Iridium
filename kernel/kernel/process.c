@@ -62,9 +62,15 @@ struct thread* create_idle_thread() {
     // The scheduler will not save context for this task,
     // and when the thread is run it will enter `idle_task()`
 
+    vm_object *user_stack_vm;
+    v_addr_t user_stack_base;
+    vm_object_create(PER_THREAD_KERNEL_STACK_SIZE, VM_READABLE | VM_WRITABLE, &user_stack_vm);
+    v_addr_region_map_vm_object(kernel_region, V_ADDR_REGION_READABLE | V_ADDR_REGION_WRITABLE,
+        user_stack_vm, NULL, 0, &user_stack_base);
+
     arch_set_instruction_pointer(&idle_thread->context, (uintptr_t)idle_task);
-    arch_set_stack_pointer(&idle_thread->context, stack_base + PER_THREAD_KERNEL_STACK_SIZE - 16);
-    arch_initialize_thread_context(&idle_thread->context, true);
+    arch_set_stack_pointer(&idle_thread->context, user_stack_base + PER_THREAD_KERNEL_STACK_SIZE - 16);
+    arch_initialize_idle_thread_context(&idle_thread->context);
 
     return idle_thread;
 }
@@ -137,7 +143,7 @@ ir_status_t thread_create(struct process* parent_process, struct thread **out) {
 
     thread->object.type = OBJECT_TYPE_THREAD;
     thread->object.parent = (object*)parent_process;
-    arch_initialize_thread_context(&thread->context, false);
+    arch_initialize_thread_context(&thread->context);
     thread->thread_id = next_thread_id;
     next_thread_id++;
     vm_object *kernel_stack_vm;

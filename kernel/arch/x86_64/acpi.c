@@ -354,7 +354,10 @@ void timer_fired(struct registers* context) {
 
     struct thread *thread = this_cpu->current_thread;
     // When the task resumes, return directly into the interrupted context rather than unwinding the stack
-    memcpy(&thread->context, context, sizeof(struct registers));
+    memcpy(&thread->context, context, sizeof(struct registers) - 16);
+    // GS and FS bases are omitted from the context save.
+    // The interrupt entry does not push them, and they are only changed
+    // on the kernel side for they don't need to be saved (yet)
 
     switch_task(true);
 }

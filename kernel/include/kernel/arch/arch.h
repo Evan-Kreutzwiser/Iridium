@@ -38,7 +38,12 @@ void arch_interrupt_remove(int irq);
 
 /// Initialize a new thread's context with some basic register values
 /// required to enter usermode and execute code
-void arch_initialize_thread_context(struct registers *context, bool is_kernel);
+void arch_initialize_thread_context(struct registers *context);
+
+/// Initialize a thread context for a kernel space idle thread
+/// @note Target thread is assumed to ONLY run on the current cpu,
+/// and that the cpu local data pointer has already been set
+void arch_initialize_idle_thread_context(struct registers *context);
 
 /// Set a thread's instruction pointer. For example, setting the entry
 /// point before starting a process
