@@ -31,9 +31,24 @@ syscall_entry:
     push %rcx
     push %r11
 
-    push %rbp
-
     mov %r10, %rcx
+
+    push %rbx
+    // rcx used by context switch
+    push %rdx
+    push %rdi
+    push %rsi
+    push %r8
+    push %r9
+    push %r10
+    // r11 used by context switch
+    push %r12
+    push %r13
+    push %r14
+    push %r15
+
+    push %rbp
+    mov %rsp, %rbp
 
     // Now following System V ABI and we have a kernel stack, enter C
     .extern syscall_handler
@@ -42,6 +57,20 @@ syscall_entry:
     // %rax holds the return value
 
     pop %rbp
+
+    pop %r15
+    pop %r14
+    pop %r13
+    pop %r12
+    // r11 used by context switch
+    pop %r10
+    pop %r9
+    pop %r8
+    pop %rsi
+    pop %rdi
+    pop %rdx
+    // rcx used by context switch
+    pop %rbx
 
     // Avoid being interrupted while having the user GS base in kernel code,
     // Since interrupt handlers use CS to determine whether to use swapgs again
