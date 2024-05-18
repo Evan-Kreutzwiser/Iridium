@@ -252,7 +252,11 @@ arch_enter_context:
     movl 0xb8(%rdi), %eax
     movl $MSR_KERNEL_GS_BASE, %ecx
     wrmsr
+    // Don't switch the GS base if we're staying in the kernel
+    cmpq $0x8, 0x90(%rdi)
+    je 1f
     swapgs
+    1:
 
     movq 0x8(%rdi), %rbx
     movq 0x10(%rdi), %rcx
@@ -334,6 +338,9 @@ arch_save_context:
 .global arch_leave_function
 .type arch_leave_function, @function
 // Helper to clean up the stack properly after a task switch
+// NOTE: Doesn't pop callee preserved registers (Not something I can easily fix).
+// Hopefully not a problem since its only used when returning from a manual scheduler
+// invokation, and a userspace context is restored immediately after.
 arch_leave_function:
     leave
     mov $0, %rax // Return IR_OK
